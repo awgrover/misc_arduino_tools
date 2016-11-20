@@ -1,0 +1,40 @@
+void loop() {
+    static char command = '0';
+
+    switch (command) {
+        // set command to '?' to display menu w/prompt
+        // set command to 0xff to prompt
+        // set command to 0xfe to just get input
+        // could do your "loop" in while(Serial.available() <= 0) { dosomething }
+
+        case '0': // desc here - default/idle command
+            command='?';
+            break;
+
+        case 'a' : // other commands..
+            command='?';
+            break;
+        
+        case '?':
+        // menu made by: use the menu.mk: make menu
+        // end menu
+
+        // fallthrough
+
+        case 0xff : // show prompt, get input
+          Serial.print(F("Choose (? for help): "));
+          // fallthrough
+
+        case 0xfe : // just get input
+          while(Serial.available() <= 0) {}
+          command = Serial.read();
+          Serial.println(command);
+          break;
+
+        default : // show help if not understood
+          delay(10); while(Serial.available() > 0) { Serial.read(); delay(10); } // empty buffer
+          command = '?';
+          break;
+
+        }
+    }

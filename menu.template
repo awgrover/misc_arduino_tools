@@ -1,0 +1,33 @@
+    static char command = 0xFF; // default is show prompt
+    switch (command) {
+        // set command to '?' to display menu w/prompt
+        // set command to 0xff to prompt
+        // set command to 0xfe to just get input
+
+        case 'a': // your command (this is desc)
+            dosomething();
+            command = '?'; // print prompt after
+            break;
+        
+        ... more commands...
+
+        case '?':
+            // menu made by:
+                make menu will update this block to print the commands/desc
+            // end menu
+
+        case 0xff : // show prompt, get input
+          Serial.print(F("Choose (? for help): "));
+          // fallthrough
+
+        case 0xfe : // just get input
+          while(Serial.available() <= 0) {}
+          command = Serial.read();
+          Serial.println(command);
+          break;
+
+        default : // show help if not understood
+          delay(10); while(Serial.available() > 0) { Serial.read(); delay(10); } // empty buffer
+          command = '?';
+          break;
+        }
