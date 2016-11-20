@@ -96,8 +96,7 @@ error: too many arguments to function 'boolean rest_a_bit()'
   # It should looke like : boolean rest_a_bit((StateMachine& sm, StateMachinePhase phase)) { ... }
 
 /* Examples
-  // blink
-  STATE(
+*/
 /* Details
 
 To signal that a machine wants to stop, arrange for the next state to be NULL ( e.g. WHEN_DONE(NULL) )
@@ -108,6 +107,8 @@ Leaving out WHEN_DONE causes the next state to be NULL.
 "Phase"
 
 Errors are not dealt with. Maybe add a flag to the struct, and test in the run().
+
+Really want to be able to do my "wait_for<20>" tricks IN the state engine. Maybe with a different macro.
 
 */
 
