@@ -1,29 +1,10 @@
   #include "state_machine.h"
 
   // This example is going to bob & weave, but respond to button presses
-
-  boolean my_setup(StateMachine& sm, StateMachinePhase phase) { 
-    if (phase == SM_Start) {  } // do the initial stuff
-    else if (phase == SM_Running) { } // keep doing stuff
-    else if (phase == SM_Finish) { } // clean up
-  }
-  boolean bob(StateMachine& sm, StateMachinePhase phase) {} // bobbing
-  boolean beep_and_go(StateMachine& sm, StateMachinePhase phase) {} // do something
-  boolean weave(StateMachine& sm, StateMachinePhase phase) {} // do something
-  boolean sit_and_beep(StateMachine& sm, StateMachinePhase phase) {
-    // stop moving
-    // run a beep for 2 seconds
-    }
-  boolean rest_a_bit(StateMachine& sm, StateMachinePhase phase) {
-    // wouldn't it be nice if I had a patter for this?
-    }
-
-  boolean momentary_button_is_down() { 
-    return digitalRead(9) == LOW; 
-    }
-
   // Describe the process: states & transitions.
   // A series of STATE blocks
+  // The order of the STATE blocks isn't supposed to matter
+  // Write the state functions above here as you go
 
   // Bracket the description of one state with STATE and END_STATE
   // This says, When we are doing "my_setup", eventually it will be done and go to "bob".
@@ -58,7 +39,7 @@
 
   // the runner is an object that keeps track of which state it is in
   // sadly you have to use STATE_NAME()
-  StateMachine bob_and_weave( STATE_NAME(my_setup) );
+  StateMachine bob_and_weave( STATE_NAME(my_setup) ); // after the STATE() declarations above
 
   void setup() {
     bob_and_weave.run(); // do the first state, i.e. setup, if you feel it necessary to separate it out
@@ -66,6 +47,28 @@
 
   void loop() {
     bob_and_weave.run();
+    }
+
+  // You should be able to write the STATE declarations above the state-functions
+
+  boolean my_setup(StateMachine& sm, StateMachinePhase phase) { 
+    if (phase == SM_Start) {  } // do the initial stuff
+    else if (phase == SM_Running) { } // keep doing stuff
+    else if (phase == SM_Finish) { } // clean up
+  }
+  boolean bob(StateMachine& sm, StateMachinePhase phase) {} // bobbing
+  boolean beep_and_go(StateMachine& sm, StateMachinePhase phase) {} // do something
+  boolean weave(StateMachine& sm, StateMachinePhase phase) {} // do something
+  boolean sit_and_beep(StateMachine& sm, StateMachinePhase phase) {
+    // stop moving
+    // run a beep for 2 seconds
+    }
+  boolean rest_a_bit(StateMachine& sm, StateMachinePhase phase) {
+    // wouldn't it be nice if I had a patter for this?
+    }
+
+  boolean momentary_button_is_down() { 
+    return digitalRead(9) == LOW; 
     }
 
 /*
