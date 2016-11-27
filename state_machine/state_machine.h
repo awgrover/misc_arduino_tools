@@ -146,6 +146,7 @@ A heartbeat looks like this:
   INTERRUPT_WHEN(the_heartbeat, act)
 
   boolean the_heartbeat() {
+      // example timer heartbeat, there is a everymillis<5000>, and nthTime<1000>
       static unsigned long every = millis() + 5000;
       Serial.print(every-millis());Serial.print(" ");
       if (millis() > every) {
@@ -309,6 +310,28 @@ boolean everymillis() {
   every = millis()+n;
   // Serial.print(millis());Serial.println(" hit"); 
   return true;
+  }
+
+template<int delayms>
+boolean sm_delay(StateMachine& sm, StateMachinePhase phase) {
+  static unsigned long till;
+
+  if (phase == SM_Finish) { 
+    // Serial.print("expired ");Serial.println(millis());
+    return false; 
+    }
+
+  if (phase == SM_Start) { till = millis() + delayms; }
+
+  return millis() < till;
+  }
+
+template<int pin, int hilo>
+boolean sm_digitalWrite(StateMachine& sm, StateMachinePhase phase) {
+  if (phase == SM_Finish || phase==SM_Start) { return true; }
+  Serial.print(pin);Serial.print("->");Serial.println(hilo);
+  digitalWrite(pin,hilo);
+  return false;
   }
 
 // Some boolean combinators for predicates, since we can't do an expression
