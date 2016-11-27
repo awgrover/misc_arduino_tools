@@ -218,7 +218,6 @@ struct StateMachine {
           else { debugm(" again\n"); }
           }
 
-
         // update
         current = next_state;
 
