@@ -2,9 +2,10 @@
 
 // v2 template based
 /*
-    actionfns of various kinds
-        // for the wrapper, allow void x(), boolean x(), boolean x(sm), boolean x(sm,phase), boolean x(phase)
     template wrapper for things like digitalWrite, and STATEAS
+    STATEAS
+    test phases!
+    test end on null
 */
 
 #define DEBUG 0
@@ -86,6 +87,13 @@ template<void fn(StateMachine &sm, StateMachinePhase phase)> inline boolean acti
 template<void fn(StateMachine &sm)> inline boolean action_function_wrapper(StateMachine &sm) { fn(sm); return false;}
 template<void fn()> inline boolean action_function_wrapper(StateMachine &sm) { fn(); return false; }
 
+const StateXtionFnPtr_ NOPREDS[] = { (StateXtionFnPtr_) NULL };
+#define SIMPLESTATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
+    return one_step(sm, action_function_wrapper<action>, _##action##_xtion, NOPREDS, _##next_state##_xtion); \
+    }
+#define SIMPLESTATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
+    return one_step(sm, action_function_wrapper<action>, _##name##_xtion, NOPREDS, _##next_state##_xtion); \
+    }
 #define STATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
     static const ActionFnPtr _action = action_function_wrapper<action>; \
     static const StateXtionFnPtr next_state_xtion = _##next_state##_xtion; \
@@ -118,6 +126,15 @@ StateXtionFnPtr_ one_step(StateMachine &sm, ActionFnPtr action, StateXtionFnPtr 
         }
     }
 
+template<const int ms> boolean delaying() {
+    static unsigned long timer = millis() + ms;
+    if (millis() >= timer) {
+        timer = millis() + ms;
+        return false;
+        }
+    return true; // again
+    }
+
 #define STATEMACHINE(machinename, firstaction) StateMachine machinename(_##firstaction##_xtion);
 
 STATE(start, count) END_STATE
@@ -126,8 +143,19 @@ STATE(hello, bawk)
     GOTOWHEN(every1000, squawk)
 END_STATE
 STATE(squawk, bawk) END_STATE
-STATE(bawk, step1) END_STATE
+STATE(bawk, stay4) END_STATE
+SIMPLESTATE(stay4, renamed1)
+SIMPLESTATEAS(renamed1, tic501, step1)
 STATE(step1, count) END_STATE
+
+STATEMACHINE (m_a,hello);
+
+SIMPLESTATE(machine2start, m2top)
+SIMPLESTATE(m2top, waitfor401)
+SIMPLESTATEAS(waitfor401, delaying<401>,m2bottom) // just names the templated
+SIMPLESTATE(m2bottom, m2top)
+
+STATEMACHINE(m_b, machine2start)
 
 //
 //
@@ -135,15 +163,15 @@ STATE(step1, count) END_STATE
 
 #define ONBOARDLED 13
 
-STATEMACHINE (m_a,hello);
 
 void setup() {
     Serial.begin(9600);
-    Serial.println("squawk every 100000, bawk every 500ms");
+    Serial.println("squawk every 100000, bawk every 500ms, stay4 by 3 every 500, tic501 every 501, m2bottom every 401");
     }
 
 void loop() {
     m_a.run();
+    m_b.run();
     }
 
 unsigned long cycle_counter=0;
@@ -189,3 +217,31 @@ void bawk() {
         signal("bawk"); 
         }
     }
+
+boolean stay4() {
+    static unsigned long timer = millis() + 500;
+    static int ct = 4;
+    static int countto4 = 0;
+    if (millis() >= timer) { // at 500, stay for 4 times
+        ct--;
+        if (ct>0) { 
+            countto4++;
+            return true;
+            } // stay
+        ct=4; timer = millis() + 500;
+        Serial.print("stay4 "); Serial.print(countto4); Serial.print(" ");Serial.print(cycle_counter); Serial.print(" "); Serial.println(millis());
+        return false;
+        }
+    }
+
+void tic501() {
+    static unsigned long timer = millis() + 500;
+    if (millis() >= timer) {
+        timer = millis() + 501;
+        signal("tic501");
+        }
+    }
+
+void machine2start() { signal("machine 2 start"); }
+void m2top() { }
+void m2bottom() { signal("m2bottom"); }
