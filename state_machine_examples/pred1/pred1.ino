@@ -1,34 +1,34 @@
 #include "state_machine.h"
 
 // preds. says squawk every 5secs, bawk every 9
+/* should look about like:
+    start-smstart
+    <setup
+    start
+    start-smfinish
+    3723 tic
+    5052 squawk
+    7396 tic
+    9051 bawk
+    9051 squawk
+    10053 squawk
+    11069 tic
+*/
 
 // the loop goes to A_top, A_start only once
-STATE(A_start)
-    WHEN_DONE(A_top)
+SIMPLESTATE(A_start, A_top)
+SIMPLESTATE(A_top, A_second)
+STATE(A_second, A_third)
+    GOTOWHEN(every5seconds, squawk)
+    GOTOWHEN(everymillis<9000>, bawk)
+    GOTOWHEN(nthTime<65535>, tic)
 END_STATE
-STATE(A_top)
-    WHEN_DONE(A_second)
-END_STATE
-STATE(A_second)
-    INTERRUPT_WHEN(every5seconds, squawk)
-    INTERRUPT_WHEN(everymillis<9000>, bawk)
-    INTERRUPT_WHEN(nthTime<65535>, tic)
-    WHEN_DONE(A_third)
-END_STATE
-STATE(A_third)
-    WHEN_DONE(A_top)
-END_STATE
-STATE(squawk)
-    WHEN_DONE(A_top)
-END_STATE
-STATE(bawk)
-    WHEN_DONE(squawk)
-END_STATE
-STATE(tic)
-    WHEN_DONE(A_third)
-END_STATE
+SIMPLESTATE(A_third, A_top)
+SIMPLESTATE(squawk, A_top)
+SIMPLESTATE(bawk, squawk)
+SIMPLESTATE(tic, A_third)
 
-StateMachine Machine_A( STATE_NAME(A_start) );
+STATEMACHINE(Machine_A,  A_start) 
 
 //
 //
@@ -37,7 +37,7 @@ StateMachine Machine_A( STATE_NAME(A_start) );
 void setup() {
     Serial.begin(9600);
     Serial.print("SM_Start, SM_Running, SM_Finish\n"); Serial.print(SM_Start);Serial.print(", "); Serial.print( SM_Running);Serial.print(", "); Serial.print( SM_Finish);Serial.print("\n");
-    Serial.print("setup starting at ");Serial.print((long)A_top);Serial.print(" as ");Serial.println((long)STATE_NAME(A_top));
+    Serial.print("setup starting at ");Serial.print((long)A_top);Serial.print(" as ");Serial.println((long)XTIONNAME(A_top));
     Machine_A.run();
     Serial.println("<setup");
     }

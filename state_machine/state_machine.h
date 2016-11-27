@@ -101,6 +101,7 @@ template<void fn()> inline boolean action_function_wrapper(StateMachine &sm) { i
 
 StateXtionFnPtr_ _NULL_xtion(StateMachine &sm) { return NULL; }
 const StateXtionFnPtr_ NOPREDS[] = { (StateXtionFnPtr_) NULL };
+#define XTIONNAME(action) _##action##_xtion
 #define SIMPLESTATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
     return one_step(sm, action_function_wrapper<action>, _##action##_xtion, NOPREDS, _##next_state##_xtion); \
     }
@@ -167,3 +168,33 @@ template<const int ms> boolean sm_delay(StateMachine &sm) {
 template<int pin, int v> void sm_digitalWrite() { digitalWrite(pin, v); }
 
 #define STATEMACHINE(machinename, firstaction) StateMachine machinename(_##firstaction##_xtion);
+
+template<int n>
+boolean everymillis() {
+  // every n millis the pred fires, like a heartbeat
+  // Has shared state for your entire program (per "n")
+  static unsigned long every = millis()+n;
+  if (millis() < every) { return false; }
+  every = millis()+n;
+  // Serial.print(millis());Serial.println(" hit");
+  return true;
+  }
+
+template<int n>
+boolean nthTime() {
+  // every nth-time the pred fires, like a heartbeat
+  // Has shared state for your entire program (per "n")
+  static int ct=n;
+  ct = ct-1;
+  if (ct) { return false; }
+  ct=n;
+  // Serial.print(millis());Serial.println(" hit");
+  return true;
+  }
+
+// Some boolean combinators for predicates, since we can't do an expression
+// Must enclose in () in the macros! ugly
+// eg.. INTERRUPT_WHEN( (&SM_and<onhook, offhook>), play_message)
+typedef boolean (&SimplePredicate)();
+template <SimplePredicate a, SimplePredicate b> boolean SM_and() { return a() && b(); }
+

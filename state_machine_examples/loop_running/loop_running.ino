@@ -1,22 +1,31 @@
 #include "state_machine.h"
 
 // A. sequence
+/* should look like:
+    start-smstart
+    <setup
+    start
+    start-smfinish
+    top-smstart
+    top
+    top-smfinish
+    second-smstart
+    second
+    second
+    second
+    second-smfinish
+    third-smstart
+    third
+    third-smfinish
+*/
 
 // the loop goes to A_top, A_start only once
-STATE(A_start)
-    WHEN_DONE(A_top)
-END_STATE
-STATE(A_top)
-    WHEN_DONE(A_second)
-END_STATE
-STATE(A_second)
-    WHEN_DONE(A_third)
-END_STATE
-STATE(A_third)
-    WHEN_DONE(A_top)
-END_STATE
+SIMPLESTATE(A_start, A_top)
+SIMPLESTATE(A_top, A_second)
+SIMPLESTATE(A_second, A_third)
+SIMPLESTATE(A_third, A_top)
 
-StateMachine Machine_A( STATE_NAME(A_start) );
+STATEMACHINE(Machine_A, A_start);
 
 //
 //
@@ -25,7 +34,7 @@ StateMachine Machine_A( STATE_NAME(A_start) );
 void setup() {
     Serial.begin(9600);
     Serial.print("SM_Start, SM_Running, SM_Finish\n"); Serial.print(SM_Start);Serial.print(", "); Serial.print( SM_Running);Serial.print(", "); Serial.print( SM_Finish);Serial.print("\n");
-    Serial.print("setup starting at ");Serial.print((long)A_top);Serial.print(" as ");Serial.println((long)STATE_NAME(A_top));
+    Serial.print("setup starting at ");Serial.print((long)A_top);Serial.print(" as ");Serial.println((long)XTIONNAME(A_top));
     Machine_A.run();
     Serial.println("<setup");
     }

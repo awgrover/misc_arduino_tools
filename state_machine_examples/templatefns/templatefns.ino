@@ -1,50 +1,43 @@
 #include "state_machine.h"
 
 // use template functions
-// 
+/* should blink the LED and look like:
+    start-smstart
+    start
+    start-smfinish
+    2052 tic
+    4052 tic
+    6052 tic
+    8052 tic
+    8052 tic2
+    10052 tic
+    12052 tic
+    12052 tic2
+*/
 
 #define LED 13
 
 // the loop goes to A_top, A_start only once
 
-STATE(A_start)
-    WHEN_DONE(A_top)
+SIMPLESTATE(A_start, A_top)
+SIMPLESTATE(A_top, delay1)
+SIMPLESTATEAS(delay1, sm_delay<2000>, tic)
+STATE(A_second, A_top) 
+    GOTOWHEN((SM_and< nthTime<4>, everymillis<1000> >), tic2) // funny behavior: 16k, then every 8k
 END_STATE
-STATE(A_top)
-    WHEN_DONE(delay1)
-END_STATE
-
-auto delay1 = sm_delay<2000>;
-STATE(delay1) WHEN_DONE(tic) END_STATE
-
-STATE(A_second) 
-    INTERRUPT_WHEN((SM_and< nthTime<4>, everymillis<1000> >), tic2) // funny behavior: 16k, then every 8k
-    WHEN_DONE(A_top) 
-END_STATE
-
-STATE(tic)
-    WHEN_DONE(A_second)
-END_STATE
-
-STATE(tic2) WHEN_DONE(A_top) END_STATE
+SIMPLESTATE(tic, A_second)
+SIMPLESTATE(tic2, A_top)
 
 // another machine
-auto digitalBhigh = sm_digitalWrite<LED, HIGH>;
-STATE(digitalBhigh) WHEN_DONE(delay500) END_STATE
-
-auto delay500 = sm_delay<500>;
-STATE(delay500) WHEN_DONE(digitalBlow) END_STATE
-
-auto digitalBlow = sm_digitalWrite<LED, LOW>;
-STATE(digitalBlow) WHEN_DONE(delay501) END_STATE
-
-auto delay501 = sm_delay<500>;
-STATE(delay501) WHEN_DONE(digitalBhigh) END_STATE
+SIMPLESTATEAS(digitalBhigh, (sm_digitalWrite<LED, HIGH>), delay500)
+SIMPLESTATEAS(delay500, sm_delay<500>, digitalBlow)
+SIMPLESTATEAS(digitalBlow, (sm_digitalWrite<LED, LOW>), delay501)
+SIMPLESTATEAS(delay501, sm_delay<500>, digitalBhigh)
 
 
 
-StateMachine Machine_A( STATE_NAME(A_start) );
-StateMachine Machine_Blink( STATE_NAME(digitalBlow) );
+STATEMACHINE(Machine_A, A_start);
+STATEMACHINE(Machine_Blink, digitalBlow);
 
 //
 //
@@ -54,7 +47,7 @@ void setup() {
     pinMode(LED,OUTPUT);
     Serial.begin(9600);
     Serial.print("SM_Start, SM_Running, SM_Finish\n"); Serial.print(SM_Start);Serial.print(", "); Serial.print( SM_Running);Serial.print(", "); Serial.print( SM_Finish);Serial.print("\n");
-    Serial.print("setup starting at ");Serial.print((long)A_top);Serial.print(" as ");Serial.println((long)STATE_NAME(A_top));
+    Serial.print("setup starting at ");Serial.print((long)A_top);Serial.print(" as ");Serial.println((long)XTIONNAME(A_top));
     // Machine_A.run();
     Serial.println("<setup");
     }
