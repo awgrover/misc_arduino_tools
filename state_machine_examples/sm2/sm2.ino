@@ -1,11 +1,24 @@
 // #include "state_machine.h"
 
-// v2 template based
-/*
-    template wrapper for things like digitalWrite, and STATEAS
-    STATEAS
-    test phases!
-    test end on null
+// v2 more flexible
+
+/* Future:
+    template< action, holdms>
+    SEQUENCE({first, ...., last}, next)
+    rewrite for tail-call optimization!
+*/
+/* debugging errors
+
+    Did you get a lot of errors? A typo somewhere is the problem. Ignore things like this:
+        error: 'start' was not declared in this scope
+    SIMPLExxx doesn't get END_STATE, can't use GOTOWHEN
+    But STATExxx needs END_STATE
+
+    error: macro "STATEAS" passed 4 arguments, but takes just 3
+    # if you use one of the sm_xxx<> things, you need parenthesis:
+    #   STATEAS(somename, ( sm_digitalWrite<PIN1, HIGH> ), nextsomething)
+    # Check for the proper STATE(from,to), STATEAS(name, from, to), etc.
+
 */
 
 #define DEBUG 0
@@ -48,18 +61,19 @@ struct StateMachine {
 
         // someone might try to run us after we signaled "all done"
         if (current == NULL) {
-            return NULL;
+            return false;
             }
 
         // The StateXtionFn (_realstatename_xtion) returns "what to do next", which may be stay
         StateXtionFnPtr next_state = (*current)(*this);
-      if (next_state != current) { 
-        debugm(" !->");debugm((long)next_state);debugm("\n"); 
-        }
-      else { 
-        phase = SM_Running;
-        debugm(" again\n"); 
-        }
+
+        if (next_state != current) { 
+            debugm(" !->");debugm((long)next_state);debugm("\n"); 
+            }
+        else { 
+            phase = SM_Running;
+            debugm(" again\n"); 
+            }
 
         // update
         current = next_state;
@@ -80,13 +94,14 @@ template<BooleanFnPtr pred, StateXtionFnRef next_state> StateXtionFnPtr_ gotowhe
 //   If you take the phase, you will see at least 3 calls: SM_Start, SM_Running, SM_Finish. SM_running will repeat till you say false
 // FIXME: not handling phase right
 template<boolean fn(StateMachine &sm, StateMachinePhase phase)> inline boolean action_function_wrapper(StateMachine &sm) { return fn(sm, sm.phase); }
-template<boolean fn(StateMachine &sm)> inline boolean action_function_wrapper(StateMachine &sm) { return fn(sm); }
+template<boolean fn(StateMachine &sm)> inline boolean action_function_wrapper(StateMachine &sm) { return sm.phase==SM_Finish ? false : fn(sm); }
 template<boolean fn(StateMachinePhase phase)> inline boolean action_function_wrapper(StateMachine &sm) { return fn(sm.phase); }
-template<boolean fn()> inline boolean action_function_wrapper(StateMachine &sm) { return fn(); }
+template<boolean fn()> inline boolean action_function_wrapper(StateMachine &sm) { return sm.phase==SM_Finish ? false : fn(); }
 template<void fn(StateMachine &sm, StateMachinePhase phase)> inline boolean action_function_wrapper(StateMachine &sm) { fn(sm, sm.phase); return false; }
-template<void fn(StateMachine &sm)> inline boolean action_function_wrapper(StateMachine &sm) { fn(sm); return false;}
-template<void fn()> inline boolean action_function_wrapper(StateMachine &sm) { fn(); return false; }
+template<void fn(StateMachine &sm)> inline boolean action_function_wrapper(StateMachine &sm) { if(sm.phase != SM_Finish) {fn(sm);} return false;}
+template<void fn()> inline boolean action_function_wrapper(StateMachine &sm) { if(sm.phase != SM_Finish) {fn();} return false; }
 
+StateXtionFnPtr_ _NULL_xtion(StateMachine &sm) { return NULL; }
 const StateXtionFnPtr_ NOPREDS[] = { (StateXtionFnPtr_) NULL };
 #define SIMPLESTATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
     return one_step(sm, action_function_wrapper<action>, _##action##_xtion, NOPREDS, _##next_state##_xtion); \
@@ -94,6 +109,11 @@ const StateXtionFnPtr_ NOPREDS[] = { (StateXtionFnPtr_) NULL };
 #define SIMPLESTATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
     return one_step(sm, action_function_wrapper<action>, _##name##_xtion, NOPREDS, _##next_state##_xtion); \
     }
+#define STATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
+    static const ActionFnPtr _action = action_function_wrapper<action>; \
+    static const StateXtionFnPtr next_state_xtion = _##next_state##_xtion; \
+    static const StateXtionFnPtr self = _##name##_xtion; \
+    static const StateXtionFnPtr_ preds[] = {
 #define STATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
     static const ActionFnPtr _action = action_function_wrapper<action>; \
     static const StateXtionFnPtr next_state_xtion = _##next_state##_xtion; \
@@ -120,23 +140,41 @@ StateXtionFnPtr_ one_step(StateMachine &sm, ActionFnPtr action, StateXtionFnPtr 
         }
     else {
         sm.phase = SM_Finish;
-        // call w/finish
+        (*action)(sm); // count on the wrappers to inhibit as necessary
         sm.phase = SM_Start;
         return nextxtion;
         }
     }
 
-template<const int ms> boolean delaying() {
-    static unsigned long timer = millis() + ms;
-    if (millis() >= timer) {
-        timer = millis() + ms;
+template<const int ms> boolean sm_delay(StateMachine &sm) {
+    // we "stay" in this state till expired, so we can use the user_data
+    if (sm.phase == SM_Start) {
+        sm.user_long = millis() + ms;
+        // I suppose we could have expired, e.g. 0ms
+        }
+        
+    if (millis() >= sm.user_long) {
+        sm.user_long = millis() + ms;
         return false;
         }
     return true; // again
     }
 
+// have to declare for ourselves to make this work
+// void digitalWrite(int, int);
+// template<void (&fn)(int, int), int a, int b> boolean sm_as_action(StateMachine &sm) { fn(a,b); return false; }
+// auto x = sm_as_action<digitalWrite, 13, HIGH>;
+// StateXtionFnPtr y = x;
+
+template<int pin, int v> void sm_digitalWrite() { digitalWrite(pin, v); }
+
 #define STATEMACHINE(machinename, firstaction) StateMachine machinename(_##firstaction##_xtion);
 
+////////////
+
+#define ONBOARDLED 13
+
+// basic states
 STATE(start, count) END_STATE
 STATE(count, hello) END_STATE
 STATE(hello, bawk)
@@ -145,33 +183,63 @@ END_STATE
 STATE(squawk, bawk) END_STATE
 STATE(bawk, stay4) END_STATE
 SIMPLESTATE(stay4, renamed1)
-SIMPLESTATEAS(renamed1, tic501, step1)
-STATE(step1, count) END_STATE
+SIMPLESTATEAS(renamed1, tic501, laststep)
+STATE(laststep, count) END_STATE
 
 STATEMACHINE (m_a,hello);
 
+// test delaying (and AS for a templat function)
 SIMPLESTATE(machine2start, m2top)
 SIMPLESTATE(m2top, waitfor401)
-SIMPLESTATEAS(waitfor401, delaying<401>,m2bottom) // just names the templated
+SIMPLESTATEAS(waitfor401, sm_delay<401>,m2bottom) // just names the templated
 SIMPLESTATE(m2bottom, m2top)
 
 STATEMACHINE(m_b, machine2start)
 
-//
-//
-//
+// Blink fast
+STATEAS(ledon, (sm_digitalWrite<ONBOARDLED, HIGH>), ledblinkwait) END_STATE
+STATEAS(ledblinkwait, sm_delay<50>, ledoff) END_STATE
+SIMPLESTATEAS(ledoff, (sm_digitalWrite<ONBOARDLED, LOW>), ledblinkwait2)
+SIMPLESTATEAS(ledblinkwait2, sm_delay<50>, ledon)
 
-#define ONBOARDLED 13
+STATEMACHINE(m_led, ledon)
+
+// Blink slow
+SIMPLESTATE(slowison, slow_ledon)
+STATEAS(slow_ledon, (sm_digitalWrite<ONBOARDLED, HIGH>), slow_ledblinkwait) END_STATE
+STATEAS(slow_ledblinkwait, sm_delay<700>, slowisoff) END_STATE
+SIMPLESTATE(slowisoff, slow_ledoff)
+SIMPLESTATEAS(slow_ledoff, (sm_digitalWrite<ONBOARDLED, LOW>), slow_ledblinkwait2)
+SIMPLESTATEAS(slow_ledblinkwait2, sm_delay<700>, slowison)
+
+STATEMACHINE(m_slowled, slowison)
+
+// This machine doesn't loop: "once through"
+
+
+SIMPLESTATE(phases, check_phases)
+SIMPLESTATE(check_phases, NULL)
+
+STATEMACHINE(m_once, phases)
+//
+//
+//
 
 
 void setup() {
+    pinMode(ONBOARDLED, OUTPUT);
     Serial.begin(9600);
-    Serial.println("squawk every 100000, bawk every 500ms, stay4 by 3 every 500, tic501 every 501, m2bottom every 401");
+    Serial.println("squawk every 100000, bawk every 500ms, stay4 by 3 every 500, tic501 every 501, m2bottom every 401, led blinks: rapid, pause, rapid");
     }
+
+boolean allow_fast = false;
 
 void loop() {
     m_a.run();
     m_b.run();
+    if (allow_fast) m_led.run(); // only run while slow is on
+    m_slowled.run();
+    m_once.run();
     }
 
 unsigned long cycle_counter=0;
@@ -189,13 +257,11 @@ boolean hello(StateMachine &sm) {
     // Serial.println("Hello");
     return false;
     }
-boolean step1(StateMachine &sm) {
-    // Serial.println("step1");
+boolean laststep(StateMachine &sm) {
+    // Serial.println("laststep");
     return false;
     }
 
-void On13() { digitalWrite(ONBOARDLED, HIGH); }
-void Off13() { digitalWrite(ONBOARDLED, HIGH); }
 boolean every1000() { 
     static unsigned long ct=10000ul; // on my UNO that's about every 400ms
     ct=ct-1;
@@ -245,3 +311,31 @@ void tic501() {
 void machine2start() { signal("machine 2 start"); }
 void m2top() { }
 void m2bottom() { signal("m2bottom"); }
+
+void slowisoff() { allow_fast = false; }
+void slowison() { allow_fast = true; }
+
+int phases_callnum = 0;
+boolean phases(StateMachinePhase phase) {
+    if (phase == SM_Start && phases_callnum == 0) {
+        phases_callnum = 1;
+        return true;
+        }
+    else if (phase == SM_Running && phases_callnum == 1) {
+        phases_callnum = 2;
+        return false; // done
+        }
+    else if (phase == SM_Finish && phases_callnum == 2) {
+        phases_callnum = 3;
+        return false; // na
+        }
+    Serial.print("Wrong sequence, was at call #");Serial.print(phases_callnum);Serial.print(" saw phase ");Serial.println(phase);
+    return false;
+    }
+
+void check_phases() {
+    if (phases_callnum != 3) {
+        Serial.print("Finished with wrong call #");Serial.println(phases_callnum);
+        }
+    else { signal("Phases worked"); }
+    }
