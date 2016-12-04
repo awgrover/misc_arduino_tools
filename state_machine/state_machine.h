@@ -7,8 +7,14 @@
 */
 /* debugging errors
 
-    Did you get a lot of errors? A typo somewhere is the problem. Ignore things like this:
-        error: 'start' was not declared in this scope
+    Did you get a lot of errors? A typo somewhere is the problem.
+        If this is at the top:
+          error: 'somename' was not declared in this scope
+            STATE(somename, somthingelse)
+        then temporarily put the declaration just above the STATE() and try again. like:
+          boolean somename(); // temporary
+          STATE(somename, somthingelse)
+    Remember to remove the temporary stuff from above
     SIMPLExxx doesn't get END_STATE, can't use GOTOWHEN
     But STATExxx needs END_STATE
 
@@ -17,9 +23,20 @@
     #   STATEAS(somename, ( sm_digitalWrite<PIN1, HIGH> ), nextsomething)
     # Check for the proper STATE(from,to), STATEAS(name, from, to), etc.
 
+    error: conversion from '<unresolved overloaded function type>' to non-scalar type 'StateXtionFnPtr_' requested
+             }; \
+    # Did you forget an END_STATE?
+
+    error: '_ring_on_xtion' was not declared in this scope
+         return one_step(sm, action_function_wrapper<action>, _##name##_xtion, NOPREDS, _##next_state##_xtion); \
+    # Do you have a STATE(ring_on...) ?
+
 */
 
+#ifndef DEBUG
 #define DEBUG 0
+#endif
+
 #if DEBUG==1
   #define debugm(msg) Serial.print(msg)
 #else
@@ -54,8 +71,14 @@ struct StateMachine {
       debugm("SM_Start, SM_Running, SM_Finish\n"); debugm(SM_Start);debugm(", "); debugm( SM_Running);debugm(", "); debugm( SM_Finish);debugm("\n");
       }
 
+    void restart( StateXtionFnPtr_  xtion) {
+      current = xtion;
+      // do we need to call finish here?
+      phase = SM_Start;
+      }
+
     boolean run() {
-        debugm("Step action ");debugm((long)current);debugm(" @");debugm(phase);debugm("...");
+        // debugm("Step action ");debugm((long)current);debugm(" @");debugm(phase);debugm("...");
 
         // someone might try to run us after we signaled "all done"
         if (current == NULL) {
@@ -66,11 +89,11 @@ struct StateMachine {
         StateXtionFnPtr next_state = (*current)(*this);
 
         if (next_state != current) { 
-            debugm(" !->");debugm((long)next_state);debugm("\n"); 
+            // debugm(" !->");debugm((long)next_state);debugm("\n"); 
             }
         else { 
             phase = SM_Running;
-            debugm(" again\n"); 
+            // debugm(" again\n"); 
             }
 
         // update
@@ -99,15 +122,43 @@ template<void fn(StateMachine &sm, StateMachinePhase phase)> inline boolean acti
 template<void fn(StateMachine &sm)> inline boolean action_function_wrapper(StateMachine &sm) { if(sm.phase != SM_Finish) {fn(sm);} return false;}
 template<void fn()> inline boolean action_function_wrapper(StateMachine &sm) { if(sm.phase != SM_Finish) {fn();} return false; }
 
+inline void debug_time() { debugm("[");debugm(millis());debugm("] "); }
+inline void debug_phase(StateMachine &sm) { 
+  #if DEBUG==1
+    static const char *phasename[] = { "SM_Start", "SM_Running", "SM_Finish" };
+    debugm(phasename[ sm.phase ]); debugm(" ");
+  #endif
+  }
+
 StateXtionFnPtr_ _NULL_xtion(StateMachine &sm) { return NULL; }
 const StateXtionFnPtr_ NOPREDS[] = { (StateXtionFnPtr_) NULL };
 #define XTIONNAME(action) _##action##_xtion
-#define SIMPLESTATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
-    return one_step(sm, action_function_wrapper<action>, _##action##_xtion, NOPREDS, _##next_state##_xtion); \
+#if DEBUG==1
+  #define SIMPLESTATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
+      debug_time(); debug_phase(sm); debugm(F(#action)); debugm(F("\n")); \
+      auto rez = one_step(sm, action_function_wrapper<action>, _##action##_xtion, NOPREDS, _##next_state##_xtion); \
+      /* debugm(F("  -> ")); debugm(rez == _##action##_xtion ? #action : #next_state);debugm(F("\n")); */ \
+      return rez; \
+      }
+#else
+    #define SIMPLESTATE(action, next_state) StateXtionFnPtr_ _##action##_xtion(StateMachine &sm) { \
+      return one_step(sm, action_function_wrapper<action>, _##action##_xtion, NOPREDS, _##next_state##_xtion); \
     }
-#define SIMPLESTATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
+#endif
+
+#if DEBUG==1
+  #define SIMPLESTATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
+      debug_time(); debug_phase(sm); debugm(F(#name":"#action)); debugm(F("\n")); \
+      auto rez = one_step(sm, action_function_wrapper<action>, _##name##_xtion, NOPREDS, _##next_state##_xtion); \
+      /* debugm(F("  -> ")); debugm(rez == _##name##_xtion ? F(#name":"#action) : F(#next_state)); debugm(F("\n")); */ \
+      return rez; \
+      }
+#else
+  #define SIMPLESTATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
     return one_step(sm, action_function_wrapper<action>, _##name##_xtion, NOPREDS, _##next_state##_xtion); \
     }
+#endif
+
 #define STATEAS(name, action, next_state) StateXtionFnPtr_ _##name##_xtion(StateMachine &sm) { \
     static const ActionFnPtr _action = action_function_wrapper<action>; \
     static const StateXtionFnPtr next_state_xtion = _##next_state##_xtion; \
@@ -124,6 +175,7 @@ const StateXtionFnPtr_ NOPREDS[] = { (StateXtionFnPtr_) NULL };
     /* // template statxtinfntpr foraction(booleanfnpt action), and with statemachine &, and with phase */ \
     return one_step(sm, _action, self, preds, next_state_xtion); \
     }
+#define RESTART(machine, action) machine.restart(_##action##_xtion)
 
 StateXtionFnPtr_ one_step(StateMachine &sm, ActionFnPtr action, StateXtionFnPtr fromxtion, const StateXtionFnPtr_ preds[], StateXtionFnPtr nextxtion) {
     boolean again = (*action)(sm);
@@ -131,7 +183,12 @@ StateXtionFnPtr_ one_step(StateMachine &sm, ActionFnPtr action, StateXtionFnPtr 
     StateXtionFnPtr *pred = (StateXtionFnPtr*)preds; // head of list
     while(*pred) { // till NULL
         StateXtionFnPtr rez = (**pred)(sm); // result is either false or a fnptr
-        if (rez) { return rez; };
+        if (rez) { 
+          sm.phase = SM_Finish;
+          (*action)(sm); // count on the wrappers to inhibit as necessary
+          sm.phase = SM_Start;
+          return rez; 
+          };
         pred++;
         }
     if ( again ) {
@@ -167,6 +224,11 @@ template<const int ms> boolean sm_delay(StateMachine &sm) {
 
 template<int pin, int v> void sm_digitalWrite() { digitalWrite(pin, v); }
 
+template <int msg> void sm_msg() { Serial.println(msg); }
+template <const char *&msg> void sm_msg() { Serial.println(*msg); }
+template <const char msg[]> void sm_msg() { Serial.println(msg); }
+
+
 #define STATEMACHINE(machinename, firstaction) StateMachine machinename(_##firstaction##_xtion);
 
 template<int n>
@@ -197,4 +259,11 @@ boolean nthTime() {
 // eg.. INTERRUPT_WHEN( (&SM_and<onhook, offhook>), play_message)
 typedef boolean (&SimplePredicate)();
 template <SimplePredicate a, SimplePredicate b> boolean SM_and() { return a() && b(); }
+template <SimplePredicate a> boolean SM_not() { return !a(); }
 
+boolean _FOREVER_xtion(StateMachine &sm) { return true; } // assume you'll use a GOTOWHEN
+
+template<unsigned long at> boolean startup_delay() {
+  // wait till clock is "at"
+  return millis() >= at;
+  }
