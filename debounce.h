@@ -14,6 +14,7 @@ So, you could do this:
   Debounce debounce_switch(10); // 10 ms debounce
 
   void setup() {
+    Serial.begin(115200); // Really fast (change setting in serial monitor!)
     pinMode(switch_pin, INPUT_PULLUP); // unpressed is HIGH
     }
     
@@ -21,6 +22,7 @@ So, you could do this:
     bool pressed;
     
     // debounce the raw signal
+    // pressed = digitalRead(switch_pin); // this should be noisy
     pressed = debounce_switch( digitalRead(switch_pin) );
 
     if (pressed) {
@@ -176,6 +178,58 @@ class Debounce : DebounceAsymmetric {
   // Debounce(int initial, int debounce_duration) : DebounceAsymmetric(initial, debounce_duration, debounce_duration) {} // HIGH/LOW are ints
   };
 
+template <bool which>
+class IgnoreTransientWhich {
+  const int duration;
+  unsigned long holding_expire; // starts at 0, which means a "which" signal will count immediately the first time.
+  bool last;
+
+  public:
+  IgnoreTransientWhich(int duration) : duration(duration), last(!which) {}
+  IgnoreTransientWhich(bool initial, int duration) : duration(duration), last(initial) {}
+
+  // FIXME: not inline?
+  bool operator()(bool hilo) const {
+    if (hilo != last) {
+      
+      // deal with a change (otherwise, it's still the same)
+
+      // immediately accept !which (it doesn't have transients)
+      if (hilo != which) {
+        holding_expire = 0; // not debouncing
+        last = hilo;
+        }
+
+      // are we already holding? (we've already seen the start of a possible transient)
+      else if (holding_expire) {
+
+        // if holding has expired, take change (after holding)
+        if (millis() > holding_expire) {
+          holding_expire = 0;
+          last = hilo;
+          }
+
+        // if not expired, ignore signal (because we are holding)
+
+      }
+
+      // transient possibly started
+      else {
+        holding_expire = millis() + holding_duration;
+      }
+
+    }
+    else {
+      holding = 0; // if it was a transient, we went back to "last". so, discard the timer
+    }
+
+    return last;
+  }
+}
+
+using IgnoreHighTransient = IgnoreTransientWhich<true>;
+using IgnoreLowTransient = IgnoreTransientWhich<false>;
+
 class IgnoreTransients {
   const int duration_high;
   const int duration_low;
@@ -207,7 +261,7 @@ class IgnoreTransients {
 
       // transient possibly started
       else {
-        holding_expire = millis() + holding_duration;
+        holding_expire = millis() + (hilo ? holding_duration_high : holding_duration_low);
       }
 
     }
@@ -217,7 +271,4 @@ class IgnoreTransients {
 
     return last;
   }
-
-template...
-IgnoreTransientHigh : immediate response to LOW, init LOW
-IgnoreTransientLow : immediate response to HIGH, init HIGH
+}
