@@ -11,9 +11,10 @@ class ExponentialSmooth {
   ExponentialSmooth(const int factor) : factor(factor) {};
 
   int smoothed() { return (int) _smoothed; }
+  int value() { return (int) _smoothed; }
   operator int() const { return (int) _smoothed; }
 
-  void reset(int v) { _smoothed = v; }
+  int reset(int v) { _smoothed = v; }
 
   // we intend it to inline
   int average(const int raw_value) { 
