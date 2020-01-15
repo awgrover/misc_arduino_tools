@@ -1,8 +1,15 @@
-    static char command = 0xFF; // default is show prompt
+# in setup()
+    Serial.begin(115200);
+
+# in void loop()
+    static char command = -1; // default is show prompt
     switch (command) {
         // set command to '?' to display menu w/prompt
-        // set command to 0xff to prompt
-        // set command to 0xfe to just get input
+        // set command to -1 to prompt
+        // set command to -2 to just get input
+
+        // Will make a display block if a case looks like:
+        // case 'a-z0-9A-Z': \s // display text
 
         case 'a': // your command (this is desc)
             dosomething();
@@ -11,16 +18,16 @@
         
         ... more commands...
 
-        case '?':
-            // menu made by:
+        case '?': // show menu & prompt
+            // menu made by: make (menu.mk):
                 make menu will update this block to print the commands/desc
             // end menu
 
-        case 0xff : // show prompt, get input
+        case -1 : // show prompt, get input
           Serial.print(F("Choose (? for help): "));
           // fallthrough
 
-        case 0xfe : // just get input
+        case -2 : // just get input
           while(Serial.available() <= 0) {}
           command = Serial.read();
           Serial.println(command);
