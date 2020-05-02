@@ -46,6 +46,15 @@
     
     if ( t1() ) { Serial.println( t1.state ); } // prints 0,1,2..9, with delay of 100 between
 
+  * Tell when an interval has passed
+    static Timer(1000);
+
+    if ( t1() ) { Serial.println("1 second"); } // once
+
+    * Is timer running?
+
+      if (t1.running) { it's running now }
+
   * Cycle through a sequence
     const char abcd[] = { 'a', 'b', 'c', 'd' }; // the sequence
     // adds the .sequence() method
@@ -59,6 +68,7 @@
     boolean happened = t1( &doit } );
     boolean happened = t1( someobject } ); // if it has a: void operator()()
     boolean happened = t1( []() { do it; } ); // "inline" function
+    boolean happened = t1( [somevar]() { do it with somevar; } ); // use vars in the body
 
     * Details
       You can't use a lambda that has a capture. But, you can refer to global/static objects.
@@ -68,6 +78,7 @@
   * Resetting
     if (tmetoreset) t1.reset(); // next in 100 msec from this call
     // t1.reset(true); // the next t1() will be true ("immediate")
+    // t1.reset(150, true); // resets the interval too!
 
   * Changing interval
  
@@ -77,42 +88,27 @@
     ...
     millis() - t1.last;
     
-  * Timer
-    static Timer t1(100);  // once, in 100 msec
-    if ( t1() ) { do it; }
 
-    // using lambda
-    boolean happened = t1( []() { do it; } ); 
-
-
-
-
-
-  2. every n, every {n, n2, n3}
-  next(n) // change n
-  toggle -> 3 state: nothing, on, off
-    lambdas?
-  3. subclass it, mixin, ...
+  ???
 
   A timeline: n1,n2,n3 => event1,event2,event3
   Special case of pred1,pred2,... => event1,event2
 */
 
-#include <Streaming.h>
-#define DEBUG Serial << '[' << millis() << "] "
-
+//#include <Streaming.h>
+//#define DEBUG Serial << '[' << millis() << "] "
 
 class Every {
   public:
     // everthing public
     unsigned long last; // last time we fired
-    unsigned long n_msec; // "delay" till next firing
+    unsigned long interval; // "delay" till next firing
 
-    Every(uint16_t n_msec, bool now = false) : n_msec(n_msec) {
-      last = millis(); // so, would wait for n_msec
+    Every(uint16_t interval, bool now = false) : interval(interval) {
+      last = millis(); // so, would wait for interval
 
       if (now) {
-        last -= n_msec; // adjust to "already expired"
+        last -= interval; // adjust to "already expired"
       }
     }
 
@@ -121,8 +117,8 @@ class Every {
       unsigned long now = millis(); // minimize drift due to this fn
       unsigned long diff = now - last;
       
-      if (diff >= n_msec) {
-        unsigned long drift = diff % n_msec;
+      if (diff >= interval) {
+        unsigned long drift = diff % interval;
         //Serial << "drift " << last << " now " << now << " d: " << drift << endl;
         last = now;
         last -= drift;
@@ -143,9 +139,9 @@ class Every {
 
     virtual void reset(boolean now=false) {
       last = millis();
-      if (now) last -= n_msec;
+      if (now) last -= interval;
     }
-    void reset(unsigned long interval, boolean now=false) { n_msec=interval; reset(now); }
+    void reset(unsigned long interval, boolean now=false) { interval=interval; reset(now); }
     
 };
 
@@ -153,8 +149,8 @@ class EveryCount : public Every { // 0..n-1
   public:
    int count;
    int state = -1; // because if(every()) will +1 befor you get sequence
-    EveryCount(unsigned int n_msec, int count, bool now = false)
-      : Every{n_msec, now}, count(count) {}
+    EveryCount(unsigned int interval, int count, bool now = false)
+      : Every{interval, now}, count(count) {}
 
     
    using Every::operator(); // in every subclass if you add a ()
@@ -186,8 +182,8 @@ class EveryToggle : public Every { // not really a ...Sequence
   public:
 
    boolean state = false; // because if(every()) will ! befor you get sequence
-    EveryToggle(unsigned int n_msec, bool now = false)
-      : Every{n_msec, now} {}
+    EveryToggle(unsigned int interval, bool now = false)
+      : Every{interval, now} {}
 
     
    using Every::operator(); // in every subclass if you add a ()
@@ -226,13 +222,13 @@ class Every2Sequence : public Every {
     constexpr static int _toggle[] = {0, 1};
 
     // captures the sequence!
-    Every2Sequence(unsigned int n_msec, const int seq_count, const T sequence[], bool now = false)
-      : Every{n_msec, now}, seq_count(seq_count), _sequence(sequence)
+    Every2Sequence(unsigned int interval, const int seq_count, const T sequence[], bool now = false)
+      : Every{interval, now}, seq_count(seq_count), _sequence(sequence)
     {}
 
     // for toggles, it's just:
-    Every2Sequence(unsigned int n_msec, bool now = false)
-      : Every{n_msec, now}, seq_count(2), _sequence(_toggle)
+    Every2Sequence(unsigned int interval, bool now = false)
+      : Every{interval, now}, seq_count(2), _sequence(_toggle)
     {}
 
     T sequence() {
@@ -247,4 +243,37 @@ class Every2Sequence : public Every {
       }
       return hit;
     }
+};
+
+class Timer {
+  public:
+    unsigned long last;
+    boolean running;
+    unsigned long interval;
+
+    Timer(unsigned long interval) : last(millis()), running(true), interval(interval) {}
+
+    boolean operator()() {
+      if ( running ) {
+        if (millis() - last >= interval) {
+          running = false; // expires, and stays expired
+         return true;
+        }
+      }
+    return false;
+    }
+
+    template <typename T>
+    boolean operator()(T lambdaF ) {
+      // simple lambda: []() { do something };
+      boolean hit = (*this)();
+      if (hit) lambdaF();
+      return hit;
+    }
+
+    void reset() {
+      running = true;
+      last = millis();
+      }
+    void reset(unsigned long interval) { interval=interval; reset(); }
 };
