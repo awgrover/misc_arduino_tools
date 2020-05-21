@@ -66,6 +66,19 @@ class PWM_NeoPixel : public PWM_Pins {
       b = rgb & 0x0000FF;
     }
 
+    void print() {
+      // print the current values, each as r,g,b, fixed up to graph
+      for(int i=0; i<NeoNumPixels; i++) {
+        uint32_t rgb_int = neo.getPixelColor( i );
+        RGB<uint8_t> rgb_parts;
+        decompose_rgb( rgb_int, rgb_parts.red, rgb_parts.green, rgb_parts.blue );
+        Serial << _FLOAT( rgb_parts.red /256.0 + 0 + i * 4, 2 );
+        Serial << _FLOAT( rgb_parts.green /256.0 + 1 + i * 4, 2 );
+        Serial << _FLOAT( rgb_parts.green /256.0 + 2 + i * 4, 2 );
+      }
+      Serial << endl;
+    }
+
     void demo() {
       // show if rgb is correct
       uint32_t cycle[4] = { 0x880000, 0x008800, 0x000088, 0x888888 };
