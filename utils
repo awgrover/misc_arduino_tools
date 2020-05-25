@@ -1,0 +1,196 @@
+#!/usr/bin/env raku
+# Utils for arduino file/project stuff
+# try: $0 --help
+
+use lib ($?FILE.IO.resolve.parent ~ '/../awgPerl6').IO.resolve.Str ;
+
+use Make;
+use Make::ExportedUtil;
+use IO::Path::Dir;
+use Make::EditFile::KV;
+
+class ArduinoMake is Make {
+    constant LibVersion = { 1.5 => 1 };
+
+    also does Make::EditFile::KV;
+
+    multi method rule('library', Numeric() $version) { #= others
+        warn "We only know about library {LibVersion.keys.gist}\n";
+        exit 1;
+        }
+
+    multi method rule('library', Numeric() $version where 1.5) { #= aka rev.2.2? ide 1.8.10
+        # In this dir, make it an arduino library
+        # i.e. assumes some .h, .cpp, etc
+        # Will do it's best, and make a 'warnings' file
+        # other versions include rev.1, rev.2 rev.2.1
+        
+        $.deps(
+            \('src'.IODir, :create),
+            \('examples'.IODir, :create),
+            \('keywords.txt'.IO, :create), # fixme: set if empty, extract public methods
+            \('library.properties'.IO, $version),
+            );
+        }
+
+    multi method rule( IO() $x where 'library.properties'.IO, Numeric() $version where 1.5) { # ensure the k=v file
+        # assumes we are cwd to the directory that becomes the library (has the .h)
+
+        sub git-config($key) {
+            note "GET $key";
+            my $rez = qqx[git config --get "$key"].chomp;
+            $rez eq '' ?? False !! $rez;
+            }
+        my $maint = <<user.email github.user>>.map( {git-config($_)} ).first(*.so) || 'TBD' ;
+        my $author = git-config('user.name') || $maint;
+        sub git-url() {
+            my $git-url = git-config('remote.origin.url');
+            if $git-url {
+                $git-url ~~ s/ ^'git@' ( <-[:]>+ ) \: /https:\/\/$0\//;
+                $git-url;
+                }
+            else {
+                Any;
+                }
+            }
+        sub git-latest-tag() {
+            if qqx[git tag -l] ne '' {
+                qqx[git describe --tags --candidates 1 --abbrev 0].chomp;
+                }
+            else {
+                Any
+                }
+            }
+        sub version-file() {
+            <<version VERSION>>.map({ $_.IO.e && $_.IO.lines[0] }).grep(*).first;
+            }
+
+        sub dot-h() {
+            state $_dot-h = do {
+                my $src = $x.sibling("src").IODir;
+                if $src.e {
+                    note "OF {"src/bob.h".IO.extension(:parts(1)) }";
+                    my @dot-hs = $src.dir.grep: { $_.extension(:parts(1)) eq 'h' }
+                    note "candidates {@dot-hs.gist}";
+                    if ! @dot-hs {
+                        Any
+                        }
+                    elsif @dot-hs.elems == 1 {
+                        @dot-hs[0];
+                        }
+                    else {
+                        # find something that matches our dir name
+                        @dot-hs.grep( { $_.basename eq ($x.resolve.parent.basename ~ ".h") })[0];
+                        }
+                    }
+                else {
+                    Any
+                    }
+                }
+            note "DOTH {$_dot-h.gist}";
+            $_dot-h;
+            }
+        sub name() {
+            dot-h() ?? dot-h().basename.IO.extension('', :parts(1) ) !! $x.resolve.parent.basename;
+            }
+
+        sub block-comment-line() {
+            state $_block = do {
+                if dot-h() {
+                    # first paragraph in the first /* */ block
+                    my @rez = dot-h().lines.grep({ 
+                        state $in;
+                        if / ^ \s* '/*' / ^ff^ / ^ \s* $ / {
+                            $in = True;
+                            }
+                        else {
+                            last if $in;
+                            False;
+                            }
+                        });
+                    note "blockP {@rez.join("\n")}\n---";
+                    @rez ?? @rez.map(*.trim) !! ();
+                    }
+                else {
+                    Any
+                    }
+                }
+            $_block;
+            }
+            
+
+        $.deps(
+            \($x, :create), # exists
+            # puts them in this order:
+            # apparently I can't do a specialized multi-method to match each key
+            # so, provide values now. FIXME: values should be calculated in rule 'k=v' at action time
+            \('k=v', 'library.properties'.IO, :name( name() )),
+            \('k=v', 'library.properties'.IO, :version( git-latest-tag() || version-file() || '' ) ),
+            \('k=v', 'library.properties'.IO, :author( $author ) ),
+            \('k=v', 'library.properties'.IO, :maintainer( $maint )), # copy from author
+            \('k=v', 'library.properties'.IO, :sentence( (block-comment-line() andthen $_[0]) || '' )),
+            \('k=v', 'library.properties'.IO, :paragraph( (block-comment-line() andthen $_[1..*-1].join(" ")) || '')), # sentence is prepended for you
+            \('k=v', 'library.properties'.IO, :category('Display|Communication|Signal Input/Output|Sensors|Device|Control|Timing|Data Storage|Data Processing|Other' )),
+            \('k=v', 'library.properties'.IO, :url( git-url() || '' ) ),
+            \('k=v', 'library.properties'.IO, :architecture('*') ),
+            \('k=v', 'library.properties'.IO, :depends('')),
+            # dot_a_linkage
+            \('k=v', 'library.properties'.IO, :includes( dot-h() || (name() ~ '.h') )),
+            # precompiled
+            # ldflags
+            );
+        }
+
+}
+
+our proto MAIN(*@pos, *%name) {*}
+
+multi sub MAIN(*@pos, *%name) { 
+    # note "pos {@pos.perl}"; 
+    main(|@pos, :class( 'ArduinoMake'), :usage(&USAGE), |%name  ) 
+    };
+
+# FIXME: duplicate
+our sub USAGE(:$class, :$onpurpose) {
+    note $*USAGE;
+    # FIXME: lame help, doesn't really list everythign usefully:
+    # FIXME: figure out how to iterate through a module's public methods
+    # FIXME: use the attached-pod mechanism for documentation
+    if ! $class { # no MAIN matched
+        say "Did you forget '=' in '--\$someoption its-value' ?";
+        }
+    say "Targets:";
+    # for Make.^methods() ->$method { # }
+    say "  for { ($class === Any) ?? 'Make (use --class X, where X is a class from this file like MakeC2RA)' !! $class.gist }";
+    my $method = ::( ($class === Any) ?? 'Make' !! $class).^lookup('rule');
+    # say "m {$method.^name} {$method.name}: {$method.candidates.gist}";
+
+    my @this-file = $?FILE.IO.lines; # FIXME: will have to do it on demand for other classes
+
+    for $method.candidates ->$actual {
+        next unless $actual.name eq 'rule';
+        # FIXME: allow other files, but read/cache/search just like @this-file
+        next unless $actual.file === $*PROGRAM-NAME;
+        my @sigs;
+        # say $method.name,' @',$method.line;
+        # for $actual.signature.params[1..*] {
+        #     # say "  ",$_.type,'() ',$_.sub_signature,' - ',$_.sub_signature.params[0].constraints.perl;
+        #     @sigs.push: $_.gist;
+        #     }
+        my $pod = $actual.WHY;
+        say '    ',$actual.line,': ',$actual.signature.gist,' ',($pod ?? "# {$pod}" !! '');
+        #say '       ',$actual.file;
+        my $source-line = @this-file[ $actual.line - 1 ].clone;
+        #say "    > $source-line";
+        # clean it up so it looks like a rule
+        $source-line ~~ s/^\s+//; # leading space
+        $source-line ~~ s/multi \s+ method \s+ //; # multi method
+        $source-line ~~ s/ \) \s+ \{ \s+ '#' /) #/; # opening { #}
+        $source-line ~~ s/ \) \s+ \{ \s* $ /)/; # opening { #}
+        # FIXME: try to use the sig instead of source line?
+        say '    ',$actual.line,': ',$source-line, ' ',$pod // '';
+        }
+    say "# But, you can't invoke rules w/named args from the command line";
+    my @subclasses = $?FILE.IO.lines.map( { $_ ~~ /^class \s+ $<mclass>=( \w+ ) \s+ "is Make"/; }).grep(*.defined);
+    for @subclasses { say "# Try: {$*PROGRAM} --help --class={$_<mclass>}"; }
+    }

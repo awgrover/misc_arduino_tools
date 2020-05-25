@@ -1,8 +1,10 @@
 #pragma once
 
 /*
+  Non-blocking replacements for delay().
   Every will tell you _at_ every n millis().
   Timer will tell you (once) when n millis() has gone by.
+  Several convenient ways to use them.
 
   * Every n millis
   
