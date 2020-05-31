@@ -2,9 +2,10 @@
 
 /*
   Non-blocking replacements for delay().
-  Every will tell you _at_ every n millis().
-  Until will tell you (once) when n millis() has gone by.
   Several convenient ways to use them.
+  Every will tell you _at_ every n millis().
+  Timer will tell you (once) when n millis() has gone by (or after, or until)
+  Every::Toggle will keep track of a toggling boolean for you.
 
   * Every n millis
   
@@ -75,7 +76,7 @@
     * Details
       You can use a lambda that has a capture. But, you can refer to global/static objects.
 
-      functions/ambdas/functors will be called with no arguments.
+      functions/lambdas/functors will be called with no arguments.
       
   * Resetting
     if (tmetoreset) t1.reset(); // next in 100 msec from this call
@@ -169,40 +170,75 @@ class Every {
     void reset(unsigned long interval, boolean now=false) { interval=interval; reset(now); }
 
     class Toggle;
+    template <typename T> class Pattern;
 };
 
-    class Every::Toggle : public Every { // not really a ...Sequence
-      public:
+class Every::Toggle : public Every { // not really a ...Sequence
+  public:
 
-      boolean state = false; // because if(every()) will ! befor you get sequence
+  boolean state = false; // because if(every()) will ! befor you get sequence
 
-      Toggle(bool now = false) : Every(now) {}
-      Toggle(int interval, bool now = false) : Every( (unsigned long) interval, now) {}
-      Toggle(unsigned long interval, bool now = false) : Every( interval, now ) {}
-        
-       using Every::operator(); // in every subclass if you add a ()
-       
-       boolean operator()() {
-          if (Every::operator()()) {
-            state = !state;
-            return true;
-          }
-          return false;
-        }
+  Toggle(bool now = false) : Every(now) {}
+  Toggle(int interval, bool now = false) : Every( (unsigned long) interval, now) {}
+  Toggle(unsigned long interval, bool now = false) : Every( interval, now ) {}
+    
+   using Every::operator(); // in every subclass if you add a ()
+   
+   boolean operator()() {
+      if (Every::operator()()) {
+        state = !state;
+        return true;
+      }
+      return false;
+    }
 
-        
-        /*
-         * Yikes, don't know how to receive a lambda with args, the base class's matches before we do
-        // lambda will get the state!
-        template <typename T>
-        boolean operator()(T lambdaF(const bool state) ) {
-          // return value is ignored from the lambda
-          boolean hit = (*this)();
-          if (hit) (*lambdaF)(this->state);
-          return hit;
-        }
-        */
+    
+    /*
+     * Yikes, don't know how to receive a lambda with args, the base class's matches before we do
+    // lambda will get the state!
+    template <typename T>
+    boolean operator()(T lambdaF(const bool state) ) {
+      // return value is ignored from the lambda
+      boolean hit = (*this)();
+      if (hit) (*lambdaF)(this->state);
+      return hit;
+    }
+    */
 
+};
+
+template <typename T>
+class Every::Pattern : public Every {
+    // has a pattern of msecs
+  public:
+    int seq_count;
+    const T *_pattern;
+    unsigned int pattern_i = -1; // because if(every()) will increment before you get pattern()
+
+    constexpr static int _heartbeat[] = {100,150,200,300}; // heart
+
+    // captures the pattern!
+    Pattern(unsigned int interval, const int seq_count, const T pattern[], bool now = false)
+      : Every{interval, now}, seq_count(seq_count), _pattern(pattern)
+    {}
+
+    // for toggles, it's just:
+    Pattern(unsigned int interval, bool now = false)
+      : Every{interval, now}, seq_count(4), _pattern(_heartbeat)
+    {}
+
+    T sequence() {
+      return pattern_i;
+    }
+
+    boolean operator()() {
+      boolean hit = Every::operator()();
+      //DEBUG << "test " << hit << endl;
+      if (hit) {
+        pattern_i = (pattern_i + 1) % seq_count;
+      }
+      return hit;
+    }
 };
 
 class EveryCount : public Every { // 0..n-1
@@ -247,7 +283,7 @@ class Every2Sequence : public Every {
     const T *_sequence;
     unsigned int sequence_i = -1; // because if(every()) will increment before you get sequence()
 
-    constexpr static int _toggle[] = {0, 1};
+    constexpr static int _toggle[] = {0, 1}; // default boolean sequence
 
     // captures the sequence!
     Every2Sequence(unsigned int interval, const int seq_count, const T sequence[], bool now = false)
@@ -299,30 +335,40 @@ class Timer { // True, once, after n millis
       return hit;
     }
 
+    boolean after() {
+      // true after the timer has expired
+      Timer::operator()(); // to update running;
+      return ! running;
+    }
+    template <typename T>
+    boolean after(T lambdaF) {
+      if (after()) { 
+        lambdaF();
+        return true;
+      }
+      return false;
+    }
+
+    boolean until() {
+      // true before the timer has expired
+      Timer::operator()(); // to update running;
+      return running;
+      }
+    template <typename T>
+    boolean until(T lambdaF) {
+      if (until()) {
+        lambdaF();
+        return true;
+      }
+      return false;
+    }
+
     void reset() {
       running = true;
       last = millis();
       }
     void reset(unsigned long interval) { interval=interval; reset(); }
 };
-
-class After : public Timer { // true after n millis
-    public:
-    After(unsigned long interval) : Timer(interval) {}
-    boolean operator()() { 
-      Timer::operator()(); // to update running;
-      return ! running; 
-      }
-    template <typename T> boolean operator()(T lambdaF ) { return Timer::operator()(lambdaF); }
-};
-
-class Until : public Timer { // true until n elapsed millis
-    public:
-    Until(unsigned long interval) : Timer(interval) {}
-    boolean operator()() { return running; }
-    template <typename T> boolean operator()(T lambdaF ) { return Timer::operator()(lambdaF); }
-};
-
 
 class NTimes {
   public:
