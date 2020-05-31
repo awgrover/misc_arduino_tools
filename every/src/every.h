@@ -3,7 +3,7 @@
 /*
   Non-blocking replacements for delay().
   Every will tell you _at_ every n millis().
-  Timer will tell you (once) when n millis() has gone by.
+  Until will tell you (once) when n millis() has gone by.
   Several convenient ways to use them.
 
   * Every n millis
@@ -273,7 +273,7 @@ class Every2Sequence : public Every {
     }
 };
 
-class Timer {
+class Timer { // True, once, after n millis
   public:
     unsigned long last;
     boolean running;
@@ -281,11 +281,11 @@ class Timer {
 
     Timer(unsigned long interval) : last(millis()), running(true), interval(interval) {}
 
-    boolean operator()() {
+    virtual boolean operator()() {
       if ( running ) {
         if (millis() - last >= interval) {
           running = false; // expires, and stays expired
-         return true;
+          return true;
         }
       }
     return false;
@@ -304,4 +304,53 @@ class Timer {
       last = millis();
       }
     void reset(unsigned long interval) { interval=interval; reset(); }
+};
+
+class After : public Timer { // true after n millis
+    public:
+    After(unsigned long interval) : Timer(interval) {}
+    boolean operator()() { 
+      Timer::operator()(); // to update running;
+      return ! running; 
+      }
+    template <typename T> boolean operator()(T lambdaF ) { return Timer::operator()(lambdaF); }
+};
+
+class Until : public Timer { // true until n elapsed millis
+    public:
+    Until(unsigned long interval) : Timer(interval) {}
+    boolean operator()() { return running; }
+    template <typename T> boolean operator()(T lambdaF ) { return Timer::operator()(lambdaF); }
+};
+
+
+class NTimes {
+  public:
+    // everthing public
+    unsigned long count = 1; // number of times to fire
+
+    NTimes(unsigned long n) : count(n) {}
+
+    virtual boolean operator()() {
+      if (count > 0) {
+        count -= 1;
+        return true;
+      }
+      else {
+        return false;
+      }
+    }
+
+    template <typename T>
+    boolean operator()(T lambdaF ) {
+      // simple lambda: []() { do something };
+      boolean hit = (*this)();
+      if (hit) lambdaF();
+      return hit;
+    }
+
+    // the 'virtual' prevents optimizing away an unused 'interval' instance-var
+    virtual void reset(unsigned long n) {
+      this->count = n;
+    }
 };
