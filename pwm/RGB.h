@@ -76,6 +76,7 @@ struct RGB {
   union { T green; T g; };
   union { T blue; T b; };
   T& operator[](int i) { return *(&red+i); } // tricky and mildly dangerous!
+  uint32_t rgb() { return ( (uint32_t) red << 16) + ( (uint32_t) green << 8) + ( (uint32_t) blue << 0); } // the all-in-one rgb value like 0xFF1099ul
   };
 
 // "padding" could make [] not work, check a few

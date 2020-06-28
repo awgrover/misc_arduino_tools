@@ -170,7 +170,7 @@ class Every {
     void reset(unsigned long interval, boolean now=false) { interval=interval; reset(now); }
 
     class Toggle;
-    template <typename T> class Pattern;
+    class Pattern;
 };
 
 class Every::Toggle : public Every { // not really a ...Sequence
@@ -207,27 +207,36 @@ class Every::Toggle : public Every { // not really a ...Sequence
 
 };
 
-template <typename T>
 class Every::Pattern : public Every {
     // has a pattern of msecs
+    // e.g.
+    //    static Every::Pattern heartbeat(500);
+    //    heartbeat( []() {
+    //      digitalWrite(LED_BUILTIN, !(heartbeat.sequence() % 2) );
+    //    });
+
   public:
     int seq_count;
-    const T *_pattern;
+    const unsigned long *_pattern;
     unsigned int pattern_i = -1; // because if(every()) will increment before you get pattern()
 
-    constexpr static int _heartbeat[] = {100,150,200,300}; // heart
-
     // captures the pattern!
-    Pattern(unsigned int interval, const int seq_count, const T pattern[], bool now = false)
-      : Every{interval, now}, seq_count(seq_count), _pattern(pattern)
+    Pattern(const int seq_count, const unsigned long pattern[], bool now = false)
+      : Every{pattern[0], now}, seq_count(seq_count), _pattern(pattern)
     {}
 
-    // for toggles, it's just:
-    Pattern(unsigned int interval, bool now = false)
-      : Every{interval, now}, seq_count(4), _pattern(_heartbeat)
-    {}
+    // for default heartbeat
+    Pattern(bool now = false)
+      : Every(1000, now)
+    { 
+    const static unsigned long _heartbeat[] = {150,250,150,700}; // heart
 
-    T sequence() {
+    this->seq_count = 4;
+    this->_pattern = _heartbeat;
+    this->interval = _pattern[0];
+    }
+
+    int sequence() {
       return pattern_i;
     }
 
@@ -236,7 +245,15 @@ class Every::Pattern : public Every {
       //DEBUG << "test " << hit << endl;
       if (hit) {
         pattern_i = (pattern_i + 1) % seq_count;
+        interval = _pattern[pattern_i];
       }
+      return hit;
+    }
+    template <typename T>
+    boolean operator()(T lambdaF) {
+      // return value is ignored from the lambda
+      boolean hit = (*this)();
+      if (hit) (*lambdaF)();
       return hit;
     }
 };
