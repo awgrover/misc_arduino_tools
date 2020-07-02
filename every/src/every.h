@@ -167,7 +167,10 @@ class Every {
       last = millis();
       if (now) last -= interval;
     }
-    void reset(unsigned long interval, boolean now=false) { interval=interval; reset(now); }
+    void reset(unsigned long interval, boolean now=false) { 
+      this->interval=interval; 
+      reset(now); 
+      }
 
     class Toggle;
     class Pattern;
