@@ -195,7 +195,6 @@ class Every::Toggle : public Every { // not really a ...Sequence
       return false;
     }
 
-    
     /*
      * Yikes, don't know how to receive a lambda with args, the base class's matches before we do
     // lambda will get the state!
@@ -418,5 +417,38 @@ class NTimes {
     // the 'virtual' prevents optimizing away an unused 'interval' instance-var
     virtual void reset(unsigned long n) {
       this->count = n;
+    }
+};
+
+class NthTime {
+  public:
+    // everthing public
+    unsigned long original_count = 1; // fire on nth
+    unsigned long count = 1; // count till next fire
+
+    NthTime(unsigned long n) : original_count(n), count(n) {}
+
+    virtual boolean operator()() {
+      if (count > 0) {
+        count -= 1;
+        return false;
+      }
+      else {
+        count = original_count;
+        return true;
+      }
+    }
+
+    template <typename T>
+    boolean operator()(T lambdaF ) {
+      // simple lambda: []() { do something };
+      boolean hit = (*this)();
+      if (hit) lambdaF();
+      return hit;
+    }
+
+    // the 'virtual' prevents optimizing away an unused 'interval' instance-var
+    virtual void reset(unsigned long n) {
+      this->original_count = this->count = n;
     }
 };
