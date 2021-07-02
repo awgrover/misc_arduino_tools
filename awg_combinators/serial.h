@@ -1,3 +1,5 @@
+#pragma once
+
 // why is this missing?
 inline Print &operator <<(Print &obj, const __FlashStringHelper* arg) { obj.print(arg); return obj; }
 

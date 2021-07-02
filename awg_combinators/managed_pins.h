@@ -1,12 +1,7 @@
+#pragma once
+
 // #define NDEBUG to disable assertions
 #include <assert.h>
-
-class ValueSource { // virtual
-  public:
-  virtual int value() = 0;
-
-  int operator()() { return value(); }
-  };
 
 /*
   Makes pin have .value(), () as value, and/or = to set

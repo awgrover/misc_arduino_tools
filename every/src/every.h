@@ -162,7 +162,7 @@ class Every {
       return hit;
     }
 
-    // the 'virtual' prevents optimizing away an unused 'interval' instance-var
+    // sadly, the 'virtual' also prevents optimizing away an unused 'interval' instance-var
     virtual void reset(boolean now=false) {
       last = millis();
       if (now) last -= interval;
@@ -218,12 +218,12 @@ class Every::Pattern : public Every {
     //    });
 
   public:
-    int seq_count;
+    unsigned int seq_count;
     const unsigned long *_pattern;
-    unsigned int pattern_i = -1; // because if(every()) will increment before you get pattern()
+    unsigned int pattern_i = 0; // because if(every()) will increment before you get pattern()
 
     // captures the pattern!
-    Pattern(const int seq_count, const unsigned long pattern[], bool now = false)
+    Pattern(const unsigned int seq_count, const unsigned long pattern[], bool now = false)
       : Every{pattern[0], now}, seq_count(seq_count), _pattern(pattern)
     {}
 
@@ -251,6 +251,13 @@ class Every::Pattern : public Every {
       }
       return hit;
     }
+
+    virtual void reset(boolean now=false) {
+      pattern_i = 0;
+      interval = _pattern[pattern_i];
+      Every::reset(now);
+    }
+
     template <typename T>
     boolean operator()(T lambdaF) {
       // return value is ignored from the lambda
@@ -329,6 +336,7 @@ class Every2Sequence : public Every {
 };
 
 class Timer { // True, once, after n millis
+  // NB: Slightly different methods than Every
   public:
     unsigned long last;
     boolean running;
@@ -386,7 +394,8 @@ class Timer { // True, once, after n millis
       running = true;
       last = millis();
       }
-    void reset(unsigned long interval) { interval=interval; reset(); }
+    void reset(int interval) { this->interval=(unsigned long) interval; reset(); }
+    void reset(unsigned long interval) { this->interval=interval; reset(); }
 };
 
 class NTimes {

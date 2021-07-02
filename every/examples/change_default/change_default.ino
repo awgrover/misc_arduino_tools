@@ -13,6 +13,7 @@ void setup() {
   Serial.print("Every default is ");
   Serial.println( default_int.interval );
   Serial.println("So:");
+  pinMode(LED_BUILTIN, OUTPUT);
   
   int ct = 0;
   while (1) {
@@ -30,5 +31,6 @@ void setup() {
 void loop() {
   if ( default_int() ) {
     Serial.println(millis());
+    digitalWrite(LED_BUILTIN, ! digitalRead(LED_BUILTIN));
   }
 }
