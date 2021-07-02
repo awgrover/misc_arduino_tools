@@ -7,3 +7,5 @@
 
 #include <awg_combinators/managed_pins.h>
 #include <awg_combinators/ExponentialSmoother.h>
+
+#include <awg_combinators/debounce.h>

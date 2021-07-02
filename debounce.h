@@ -114,7 +114,7 @@ class DebounceWhich {
   bool last;
 
   public:
-  DebounceHigh(int duration) : duration(duration), last(!which) {}
+  DebounceWhich(int duration) : duration(duration), last(!which) {}
 
   // FIXME: don't inline
   bool operator()(bool hilo) const {
@@ -132,6 +132,7 @@ class DebounceWhich {
       }
 
     return last; // always return the debounced value
+    }
   }
 
 };
@@ -148,7 +149,7 @@ class DebounceAsymmetric {
   bool last;
 
   public:
-  DebounceAssymetric(bool initial, int duration_high, int duration_low) : duration_high(duration_high), duration_low(duration_low), last(initial) {}
+  DebounceAsymmetric(bool initial, int duration_high, int duration_low) : duration_high(duration_high), duration_low(duration_low), last(initial) {}
 
   // FIXME: don't inline?
   bool operator()(bool hilo) const {
@@ -168,7 +169,7 @@ class DebounceAsymmetric {
 
   }
 
-}
+};
 
 class Debounce : DebounceAsymmetric {
   // FIXME: we could use 1 less int by rewriting the asymmetric class
@@ -178,7 +179,7 @@ class Debounce : DebounceAsymmetric {
   // Debounce(int initial, int debounce_duration) : DebounceAsymmetric(initial, debounce_duration, debounce_duration) {} // HIGH/LOW are ints
   };
 
-template <bool which>
+template <boolean which>
 class IgnoreTransientWhich {
   const int duration;
   unsigned long holding_expire; // starts at 0, which means a "which" signal will count immediately the first time.
