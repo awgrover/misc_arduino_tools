@@ -19,13 +19,15 @@
     Get the Adafruit_StepperMotor as ->stepperBlock
 
   #include <AccelStepper.h>
-  #include "AccelStepperMotorShield.h"
+  // if you want debug output:
+  #define DEBUG
+  #include <AccelStepperMotorShield.h>
 
   Adafruit_MotorShield MotorShield1 = Adafruit_MotorShield(); // shield #1
   // Make it just like a AccelStepper
   AccelStepperMotorShield stepper1_2 = AccelStepperMotorShield(
                                     MotorShield1,
-                                    2 // stepper block #2
+                                    2, // stepper block #2
                                     SINGLE // optional/default, the stepperBlock.step-style
                                   );
 
@@ -40,7 +42,14 @@
 */
 
 #include <Adafruit_MotorShield.h>
-#include "AccelStepperMotorShield.h"
+#include <AccelStepper.h> //Stepper motor Library
+
+#ifndef DEBUG
+  #define DEBUG 0
+#else
+  // a weird way of saying: defined, but no explicit value
+  #define DEBUG 1
+#endif
 
 class AccelStepperMotorShield : public AccelStepper {
     static void dumy() {} // nop
@@ -50,6 +59,9 @@ class AccelStepperMotorShield : public AccelStepper {
     Adafruit_MotorShield &shield;
     int step_style; // e.g. SINGLE MICROSTEP
     unsigned short steps_per_revolution; // the stepperBlock's isn't accessible
+    #ifdef DEBUG
+    int stepperBlock_i; // because actual stepperBlock_i is private. thanks.
+    #endif
 
     AccelStepperMotorShield(Adafruit_MotorShield &shield, const int stepperBlock, const int step_style = SINGLE, const int steps = 200)
       : shield(shield),
@@ -61,9 +73,17 @@ class AccelStepperMotorShield : public AccelStepper {
         // because it would have to refer to this->stepperBlock
         // but we want as-if forward/backward behavior (aka "custom"):
         AccelStepper(&dumy, &dumy) // signal "doing custom step()"
+        #ifdef DEBUG
+        ,stepperBlock_i(stepperBlock)
+        #endif
     {} // can't call shield.begin() at constructor time
 
     void begin() {
+      if (DEBUG) {
+        Serial.print(F("ASMS Begin shield &")); Serial.print((long) &shield);
+        Serial.print(F(" block "));Serial.print(stepperBlock_i);
+        Serial.println(F(" steps/rev"));
+      }
       shield.begin();
     }
 
@@ -79,8 +99,14 @@ class AccelStepperMotorShield : public AccelStepper {
     void setRPS(const float rpm) {
       setSpeed( steps_per_revolution * rpm);
     }
-    void moveRevolutions(const float rev) { move(steps_per_revolution * rev); }
-    void moveToRevolution(const float rev) { moveTo(steps_per_revolution * rev); }
+    void moveRevolutions(const float rev) { 
+      if (DEBUG) { Serial.println(F("ASMS +/- revs "));Serial.println(rev); }
+      move(steps_per_revolution * rev); 
+    }
+    void moveToRevolution(const float rev) { 
+      if (DEBUG) { Serial.println(F("ASMS to rev "));Serial.println(rev); }
+      moveTo(steps_per_revolution * rev); 
+    }
     
     // The overrides
     void step(long step) {
@@ -91,8 +117,8 @@ class AccelStepperMotorShield : public AccelStepper {
 
     void disableOutputs() {
       // This doesn't work for me
+      if (DEBUG) Serial.println(F("ASMS disable-outputs"));
       stepperBlock->release();  // translates to "free spin"
     }
-
     
 };

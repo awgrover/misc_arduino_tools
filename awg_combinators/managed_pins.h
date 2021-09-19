@@ -38,10 +38,19 @@ class AnalogPin : public ManagedPin {
   AnalogPin(int pin) : ManagedPin(pin) {
     reserve(pin);
     pinMode(pin, INPUT);
-    analogWrite(pin, 0);
     }
 
   int value() { return analogRead( pin ); }
+};
+
+class AnalogPinWithDelay : public AnalogPin {
+  // prevents ADC interference between pins at the cost of a 1msec blocking delay
+  public:
+  AnalogPinWithDelay(int pin) : AnalogPin(pin) {}
+  int value() { 
+    analogRead(pin); delay(1);
+    return analogRead( pin );
+    }
 };
 
 class DigitalPin : public ManagedPin {
@@ -54,6 +63,13 @@ class DigitalPin : public ManagedPin {
   int value() { return digitalRead( pin ); }
   void operator=(int hilo) { digitalWrite(pin, hilo); }
   void operator=(boolean hilo) { digitalWrite(pin, hilo); }
+};
+
+class Switch : public DigitalPin {
+  // just does INPUT_PULLUP and inverts the value
+  public:
+  Switch(int pin) : DigitalPin(pin, INPUT_PULLUP) {}
+  int value() { return ! DigitalPin::value(); }
 };
 
 class PWMPin : public ManagedPin {

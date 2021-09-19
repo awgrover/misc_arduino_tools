@@ -38,6 +38,7 @@ class ExponentialSmoother : public ValueSource {
   int value() {
     return smoother->average( valuable->value() );
   }
+  int raw_value() { return valuable->raw_value(); }
 
   void operator=(int newvalue) { smoother->reset( newvalue ); }
 };
