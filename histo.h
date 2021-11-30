@@ -6,7 +6,7 @@ template <typename T>
 class Histogram {
   // T must be one of the numerics int, float, byte, etc
   public:
-    T *buckets; // 0..n buckets, use count_at(T value) or bucket_value(int i)
+    int *buckets; // 0..n buckets, use count_at(T value) or bucket_value(int i)
     const int bucket_ct;
     const T low_value;
     const T high_value;
@@ -18,7 +18,7 @@ class Histogram {
       high_value(high_value),
       bucket_width( (high_value - low_value) / bucket_ct )
     {
-      buckets = new T[bucket_ct];
+      buckets = new int[bucket_ct];
       reset();
     }
 
@@ -43,4 +43,25 @@ class Histogram {
       return map( i, 0, bucket_ct, low_value, high_value) + bucket_width/2;
     }
     // bucket_value_next(i) would be bucket_value(i+1). i.e. can't get max!
+
+    template <typename LambdaEachType> // we expect a [](int i) lambda
+    void foreach( LambdaEachType eacher ) {
+      for(int i=0; i< bucket_ct; i++) {
+        eacher( i );
+      }
+    }
+
+    void print_bucket_counts() {
+      // print csv of the bucket counts
+      foreach( [this](int i) { 
+        Serial << buckets[i] << (i < this->bucket_ct-1 ? "," : "");
+      });
+    }
+
+    void print_bucket_temps() {
+      // print csv of the bucket_values()
+      foreach( [this](int i) { 
+        Serial << bucket_value(i) << (i < this->bucket_ct-1 ? "," : "");
+      });
+    }
 };
