@@ -1,0 +1,508 @@
+#!/usr/bin/env perl
+
+use strict; use warnings; no warnings 'uninitialized'; use 5.012; no if ($^V ge v5.18.0), warnings => 'experimental::smartmatch';
+use Carp; $SIG{__DIE__} = sub { Carp::confess @_ };
+
+use File::Basename qw(basename dirname);
+use IO::Dir;
+use IO::File;
+
+use awgrover::getopt2;
+
+our $board_dir = $ENV{HOME} . "/.arduino15/packages";
+
+# extracted from https://ww1.microchip.com/downloads/en/DeviceDoc/SAM_D21_DA1_Family_DataSheet_DS40001882F.pdf
+our %i2c_pads = ( 0=>'sda', 1=>'scl' );
+our %alt_sercom_only =
+    # Pxnn => 1 # if the sercom entry is alt only
+    # because we can't tell from the copypasta
+    map { $_=>1 } qw(PA00 PA01 PB08 PB09 PA04 PA05 PA06 PA07 PB10 PB11 PB22 PB23 PA30 PA31 PB30 PB31);
+
+sub main {
+    exec $0,'--help';
+    }
+
+sub do_boards {
+    my $substring = shift @ARGV;
+
+    for my $variant_dir (sort `find $board_dir -type d -name variants`) {
+        # /home/awgrover/.arduino15/packages/adafruit/hardware/samd/1.7.8/variants
+        chomp $variant_dir;
+        my $arch_dir = dirname(dirname($variant_dir));
+        my $arch = basename($arch_dir);
+        my $mfg = basename(dirname(dirname($arch_dir)));
+
+        my $dh = IO::Dir->new( $variant_dir);
+        my @boards;
+        my $board;
+        push @boards, $board while $board = $dh->read;
+        @boards = grep {! /^\.\.?$/ } @boards;
+        if (defined $substring) {
+            @boards = grep { /$substring/ } @boards;
+            }
+        
+        printf("%-20s %-10s %s\n", $mfg, $arch, $_) for sort @boards;
+        }
+    }
+
+sub find_board {
+    my ($name) = @_;
+    my $board_dir = `find $board_dir/*/hardware/*/*/variants -name $name`;
+    chomp $board_dir;
+    warn "# $board_dir";
+    return $board_dir;
+    }
+
+sub do_assigned {
+    describe_pins(shift @ARGV, 1, 0, 0);
+    }
+
+sub do_pins {
+    $opts{pn}=1 if $opts{'sort-pn'};
+    describe_pins(shift @ARGV, 0, $opts{pn}, $opts{'sort-pn'});
+    }
+
+
+sub describe_pins {
+    my ($board, $only_sercom, $short, $sort_pn) = @_;
+    #die "sort? '$sort_pn'";
+    my $cpp = find_board($board) . "/variant.cpp";
+    die "No such board, try 'boards'" if ! -e $cpp;
+    say "# $cpp";
+    say "# 'PORTA, nn' -> PAnn, likewise PORTB -> PBnn";
+    #say "# 
+
+    my $in_desc_list = 0;
+    my $pin = 0;
+    my @pn;
+    my $fh = IO::File->new( $cpp, 'r');
+    READ:
+    while (<$fh>) {
+        chomp $_;
+        given($_) {    
+            when (/PinDescription g_APinDescription/) {
+                $in_desc_list = 1;
+                say $_;
+                }
+            when (!!$in_desc_list && $_ =~ /^\s*\{\s*PORT/) {
+                if ( !$only_sercom || ( $only_sercom && ($_ =~ /\bPIO_SERCOM/) )) {
+                    if ($short) {
+                        my ($pab, $pn) = /\{\s*PORT([AB])\s*,\s*(\d+)/;
+                        if ($sort_pn) {
+                            push @pn, sprintf("P%s%02d [%2d]", $pab, $pn, $pin );
+                            }
+                        else {
+                            printf "[%2d] P%s%02d\n", $pin, $pab,$pn;
+                            }
+                        }
+                    else {
+                        printf "[%2d] %s\n",$pin,$_;
+                        }
+                    }
+                $pin += 1;
+                }
+            when (!!$in_desc_list && $_ =~ /;/ ) {
+                $in_desc_list = 0;
+                last;
+                }
+            default {
+                # say ".";
+                }
+            }
+        }
+    if ($sort_pn) {
+        say $_ for sort @pn;
+        }
+    say "# pins $pin";
+    say "# look at: http://www.atmel.com/images/atmel-42181-sam-d21_datasheet.pdf";
+    say "#      or: https://ww1.microchip.com/downloads/en/DeviceDoc/SAM_D21_DA1_Family_DataSheet_DS40001882F.pdf";
+    say "#      Section 6: Multiplexing and Considerations";
+    say "#      column 'I/O Pin' == PAnn or PBnn";
+    say "#      column C & D are the sercom N's and sercom Pads";
+    say "#              i2c must be: SDA=pad0, SCL=pad1";
+    say "#              find some PAnn corresponding to SercomX/pad0|1, and figure out the arduino-pin";
+    say "#              'connect' to sercom: pinPeripheral(11, PIO_SERCOM); // #include <wiring_private.h>";
+            
+    }
+
+sub sercom_map {
+    my ($dump) = @_;
+    state %_sercom_map;
+
+    if ( ! %_sercom_map ) {
+
+        # concatenate lines back to full lines
+
+        my $previous_line;
+        my @lines;
+        while (<DATA>) {
+            chomp $_;
+            given ($_) {
+                when ( /^\d+ / ) {
+                    # begins with number is beginning of line
+                    #print "\n";
+                    say $lines[-1] if $dump;
+                    push @lines,"";
+
+                    # SERCOM5/ ... next line
+                    # ... next line w/o preceding number
+                    #print $_;
+                    $lines[-1] .= $_;
+                    }
+                default {
+                    # other lines are continuation:
+                    # either /more or new column
+                    #print( ($previous_line =~ /\/$/ ? "" : " "),$_);
+                    $lines[-1] .= ($previous_line =~ /\/$/ ? "" : " ").$_;
+                    }
+                }
+            $previous_line = $_;
+            }
+        #print "\n";
+        say $lines[-1] if $dump;
+
+        # parse lines for Pxnn ... SERCOMn/PAD[n] x2
+        
+        for (@lines) {
+            # there are some garbage lines (headers)
+
+            # leading data is the 3 samd type's chip pins.
+            #       27 41 53 PA28
+            my ($port_pin, $rest) = /\s(P[AB]\d+)\s+(.+)/;
+            next if !$port_pin;
+            #say "# $port_pin | $rest";
+            
+            # There is no way to tell from the copypasta if the sercom info is 'sercom' or 'sercom-alt'
+            # unless both appear (so we'll need a manual table/fixup somewhere)
+            #   SERCOM2/PAD[0] SERCOM4/PAD[0]
+            my $add_sercom = sub {
+                my ($rest, $nth_parse) = @_;
+
+                my ($sercom_n, $pad_n) = $rest =~ /\sSERCOM(\d)\/PAD\[(\d)\]/;
+                return undef if !defined $sercom_n;
+
+                $rest = $';
+                #say "#     sercom<$sercom_n>/pad<$pad_n> alt-only? ",$alt_sercom_only{$port_pin},"| $rest";
+
+                # Pxnn (portA|B+pin-nn) => { sercom => { n => A|B, pad => n }, sercom_alt => { n pad } }
+                my $which_1st_sercom = ($nth_parse==1 || $alt_sercom_only{$port_pin}) ? 'sercom_alt' : 'sercom';
+                $_sercom_map{ $port_pin }->{ $which_1st_sercom } = { n => $sercom_n, pad => $pad_n };
+                #print " <i2c? ",join(" ", keys 
+                if ( $i2c_pads{$pad_n} ) {
+                    $_sercom_map{ $port_pin }->{ $which_1st_sercom }->{ i2c } = $i2c_pads{$pad_n};
+                    }
+
+                return 1,$rest;
+                };
+
+            my ($had_sercom, $rest) = $add_sercom->($rest, 0);
+            next if !$had_sercom;
+            # 2nd is optional
+            #say "#   that was first sercom string, try in: $rest";
+            $add_sercom->($rest, 1);
+
+            }
+        }
+    return \%_sercom_map;
+    }
+
+sub do_sercom_map {
+    sercom_map('print');
+    say "# SERCOM map";
+    for my $port_pin (sort keys %{ sercom_map() }) {
+        my $sercoms = sercom_map->{ $port_pin };
+
+        print "$port_pin";
+        #print " <sercoms ",join(" ", keys %$sercoms),"> ";
+        for (qw(sercom sercom_alt)) {
+            if ( exists $sercoms->{$_} ) {
+                printf " %s %d[%d] %3s", $_, $sercoms->{$_}->{n}, $sercoms->{$_}->{pad}, $sercoms->{$_}->{i2c};
+                }
+            }
+        print "\n";
+        }
+    }
+
+opts(
+  '#' => "arduino sercom deduction",
+  # top-level key is 'command', auto invokes do_\$command with \$opts{}
+  'boards' => "--- [substring] # list boards $board_dir",
+  'assigned' => '--- $board # pins already assigned to sercom',
+  'pins' => [
+    '#' => '--- $board # all the pins from variants.cpp',
+    'pn' => 'just ardiuno-pin -> PxN notation',
+    'sort-pn' => 'implies --pn, sort by A|B & N',
+    ],
+  'sercom-map' => 'samd21 PxNN => sercom-N/pad',
+  );
+
+# copypasta from
+# https://ww1.microchip.com/downloads/en/DeviceDoc/SAM_D21_DA1_Family_DataSheet_DS40001882F.pdf
+__DATA__
+1 1 1 PA00 VDDANA EXTINT[0] SERCOM1/
+PAD[0]
+TCC2/WO[0]
+2 2 2 PA01 VDDANA EXTINT[1] SERCOM1/
+PAD[1]
+TCC2/WO[1]
+3 3 3 PA02 VDDANA EXTINT[2] AIN[0] Y[0] VOUT TCC3/
+WO[0]
+4 4 4 PA03 VDDANA EXTINT[3] ADC/VREFA
+DAC/VREFA
+AIN[1] Y[1] TCC3/
+WO[1]
+5 PB04 VDDANA EXTINT[4] AIN[12] Y[10]
+6 PB05 VDDANA EXTINT[5] AIN[13] Y[11]
+9 PB06 VDDANA EXTINT[6] AIN[14] Y[12]
+10 PB07 VDDANA EXTINT[7] AIN[15] Y[13]
+7 11 PB08 VDDANA EXTINT[8] AIN[2] Y[14] SERCOM4/
+PAD[0]
+TC4/WO[0] TCC3/
+WO[6]
+8 12 PB09 VDDANA EXTINT[9] AIN[3] Y[15] SERCOM4/
+PAD[1]
+TC4/WO[1] TCC3/
+WO[7]
+5 9 13 PA04 VDDANA EXTINT[4] ADC/VREFB AIN[4] AIN[0] Y[2] SERCOM0/
+PAD[0]
+TCC0/WO[0] TCC3/
+WO[2]
+6 10 14 PA05 VDDANA EXTINT[5] AIN[5] AIN[1] Y[3] SERCOM0/
+PAD[1]
+TCC0/WO[1] TCC3/
+WO[3]
+7 11 15 PA06 VDDANA EXTINT[6] AIN[6] AIN[2] Y[4] SERCOM0/
+PAD[2]
+TCC1/WO[0] TCC3/
+WO[4]
+8 12 16 PA07 VDDANA EXTINT[7] AIN[7] AIN[3] Y[5] SERCOM0/
+PAD[3]
+TCC1/WO[1] TCC3/
+WO[5]
+I2S/SD[0]
+11 13 17 PA08 VDDIO NMI AIN[16] X[0] SERCOM0/
+PAD[0]
+SERCOM2/
+PAD[0]
+TCC0/WO[0] TCC1/
+WO[2]
+I2S/SD[1]
+12 14 18 PA09 VDDIO EXTINT[9] AIN[17] X[1] SERCOM0/
+PAD[1]
+SERCOM2/
+PAD[1]
+TCC0/WO[1] TCC1/
+WO[3]
+I2S/
+MCK[0]
+13 15 19 PA10 VDDIO EXTINT[10] AIN[18] X[2] SERCOM0/
+PAD[2]
+SERCOM2/
+PAD[2]
+TCC1/WO[0] TCC0/
+WO[2]
+I2S/
+SCK[0]
+GCLK_IO[4]
+14 16 20 PA11 VDDIO EXTINT[11] AIN[19] X[3] SERCOM0/
+PAD[3]
+SERCOM2/
+PAD[3]
+TCC1/WO[1] TCC0/
+WO[3]
+I2S/FS[0] GCLK_IO[5]
+19 23 PB10 VDDIO EXTINT[10] SERCOM4/
+PAD[2]
+TC5/WO[0] TCC0/
+WO[4]
+I2S/
+MCK[1]
+GCLK_IO[4]
+20 24 PB11 VDDIO EXTINT[11] SERCOM4/
+PAD[3]
+TC5/WO[1] TCC0/
+WO[5]
+I2S/
+SCK[1]
+GCLK_IO[5]
+25 PB12 VDDIO EXTINT[12] X[12] SERCOM4/
+PAD[0]
+TC4/WO[0] TCC0/
+WO[6]
+I2S/FS[1] GCLK_IO[6]
+26 PB13 VDDIO EXTINT[13] X[13] SERCOM4/
+PAD[1]
+TC4/WO[1] TCC0/
+WO[7]
+GCLK_IO[7]
+27 PB14 VDDIO EXTINT[14] X[14] SERCOM4/
+PAD[2]
+TC5/WO[0] GCLK_IO[0]
+SAM D21/DA1 Family
+I/O Multiplexing and Considerations
+© 2020 Microchip Technology Inc. Complete Datasheet DS40001882F-page 30
+...........continued
+Pin(1) I/O Pin Supply A B(2)(3) C D E F G H
+SAMD2xE SAMD2xG SAMD2xJ EIC REF ADC AC PTC DAC SERCOM(2)(3) SERCOM-ALT TC(4)
+/TCC
+TCC COM AC/
+GCLK
+28 PB15 VDDIO EXTINT[15] X[15] SERCOM4/
+PAD[3]
+TC5/WO[1] GCLK_IO[1]
+21 29 PA12 VDDIO EXTINT[12] SERCOM2/
+PAD[0]
+SERCOM4/
+PAD[0]
+TCC2/WO[0] TCC0/
+WO[6]
+AC/CMP[0]
+22 30 PA13 VDDIO EXTINT[13] SERCOM2/
+PAD[1]
+SERCOM4/
+PAD[1]
+TCC2/WO[1] TCC0/
+WO[7]
+AC/CMP[1]
+15 23 31 PA14 VDDIO EXTINT[14] SERCOM2/
+PAD[2]
+SERCOM4/
+PAD[2]
+TC3/WO[0] TCC0/
+WO[4]
+GCLK_IO[0]
+16 24 32 PA15 VDDIO EXTINT[15] SERCOM2/
+PAD[3]
+SERCOM4/
+PAD[3]
+TC3/WO[1] TCC0/
+WO[5]
+GCLK_IO[1]
+17 25 35 PA16 VDDIO EXTINT[0] X[4] SERCOM1/
+PAD[0]
+SERCOM3/
+PAD[0]
+TCC2/WO[0] TCC0/WO[6] GCLK_IO[2]
+18 26 36 PA17 VDDIO EXTINT[1] X[5] SERCOM1/
+PAD[1]
+SERCOM3/
+PAD[1]
+TCC2/WO[1] TCC0/WO[7] GCLK_IO[3]
+19 27 37 PA18 VDDIO EXTINT[2] X[6] SERCOM1/
+PAD[2]
+SERCOM3/
+PAD[2]
+TC3/WO[0] TCC0/
+WO[2]
+AC/CMP[0]
+20 28 38 PA19 VDDIO EXTINT[3] X[7] SERCOM1/
+PAD[3]
+SERCOM3/
+PAD[3]
+TC3/WO[1] TCC0/
+WO[3]
+I2S/SD[0] AC/CMP[1]
+39 PB16 VDDIO EXTINT[0] SERCOM5/
+PAD[0]
+TC6/WO[0] TCC0/
+WO[4]
+I2S/SD[1] GCLK_IO[2]
+40 PB17 VDDIO EXTINT[1] SERCOM5/
+PAD[1]
+TC6/WO[1] TCC0/
+WO[5]
+I2S/
+MCK[0]
+GCLK_IO[3]
+29 41 PA20 VDDIO EXTINT[4] X[8] SERCOM5/
+PAD[2]
+SERCOM3/
+PAD[2]
+TC7/WO[0] TCC0/
+WO[6]
+I2S/
+SCK[0]
+GCLK_IO[4]
+30 42 PA21 VDDIO EXTINT[5] X[9] SERCOM5/
+PAD[3]
+SERCOM3/
+PAD[3]
+TC7/WO[1] TCC0/
+WO[7]
+I2S/FS[0] GCLK_IO[5]
+21 31 43 PA22 VDDIO EXTINT[6] X[10] SERCOM3/
+PAD[0]
+SERCOM5/
+PAD[0]
+TC4/WO[0] TCC0/
+WO[4]
+GCLK_IO[6]
+22 32 44 PA23 VDDIO EXTINT[7] X[11] SERCOM3/
+PAD[1]
+SERCOM5/
+PAD[1]
+TC4/WO[1] TCC0/
+WO[5]
+USB/SOF 1kHz GCLK_IO[7]
+23 33 45 PA24(6) VDDIO EXTINT[12] SERCOM3/
+PAD[2]
+SERCOM5/
+PAD[2]
+TC5/WO[0] TCC1/
+WO[2]
+USB/DM
+24 34 46 PA25(6) VDDIO EXTINT[13] SERCOM3/
+PAD[3]
+SERCOM5/
+PAD[3]
+TC5/WO[1] TCC1/
+WO[3]
+USB/DP
+37 49 PB22 VDDIO EXTINT[6] SERCOM5/
+PAD[2]
+TC7/WO[0] TCC3/
+WO[0]
+GCLK_IO[0]
+38 50 PB23 VDDIO EXTINT[7] SERCOM5/
+PAD[3]
+TC7/WO[1] TCC3/
+WO[1]
+GCLK_IO[1]
+25 39 51 PA27 VDDIO EXTINT[15] TCC3/
+WO[6]
+GCLK_IO[0]
+27 41 53 PA28 VDDIO EXTINT[8] TCC3/
+WO[7]
+GCLK_IO[0]
+31 45 57 PA30 VDDIO EXTINT[10] SERCOM1/
+PAD[2]
+TCC1/WO[0] TCC3/
+WO[4]
+SWCLK GCLK_IO[0]
+32 46 58 PA31 VDDIO EXTINT[11] SERCOM1/
+PAD[3]
+TCC1/WO[1] TCC3/
+WO[5]
+SWDIO(5)
+59 PB30 VDDIO EXTINT[14] SERCOM5/
+PAD[0]
+TCC0/WO[0] TCC1/
+WO[2]
+60 PB31 VDDIO EXTINT[15] SERCOM5/
+PAD[1]
+TCC0/WO[1] TCC1/
+WO[3]
+61 PB00 VDDANA EXTINT[0] AIN[8] Y[6] SERCOM5/
+PAD[2]
+TC7/WO[0]
+62 PB01 VDDANA EXTINT[1] AIN[9] Y[7] SERCOM5/
+PAD[3]
+TC7/WO[1]
+47 63 PB02 VDDANA EXTINT[2] AIN[10] Y[8] SERCOM5/
+PAD[0]
+TC6/WO[0] TCC3/
+WO[2]
+48 64 PB03 VDDANA EXTINT[3] AIN[11] Y[9] SERCOM5/
+PAD[1]
+TC6/WO[1] TCC3/
+WO
