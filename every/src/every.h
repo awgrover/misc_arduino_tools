@@ -200,6 +200,79 @@ class Every {
     class Pattern;
 };
 
+class EveryMicros {
+  public:
+    // everthing public
+    unsigned long last; // last time we fired
+    unsigned long interval = 1000; // "delay" till next firing
+
+    // set interval at x() time, default 1000
+    EveryMicros(bool now = false) : EveryMicros( 1000, now) {}
+
+    EveryMicros(int interval, bool now = false) : EveryMicros( (unsigned long) interval, now) {}
+    EveryMicros(unsigned long interval, bool now = false) : interval(interval) {
+      last = micros(); // so, would wait for interval
+
+      if (now) {
+        last -= interval; // adjust to "already expired"
+      }
+    }
+
+    virtual boolean operator()() {
+      // lots of this class means lots of calls to micros()
+      unsigned long now = micros(); // minimize drift due to this fn
+      unsigned long diff = now - last;
+      
+      if (diff >= interval) {
+        unsigned long drift = diff % interval;
+        // DEBUG << "drift " << last << " now " << now << " d: " << drift << endl;
+        last = now;
+        last -= drift;
+        return true;
+      }
+      else {
+        return false;
+      }
+    }
+    // so you can use "bare" numbers like 100 for 100msec
+    boolean operator()(int x_interval) { return (*this)( (unsigned long) x_interval); }
+    boolean operator()(unsigned long x_interval) {
+      unsigned long now = micros(); // minimize drift due to this fn
+      unsigned long diff = now - last;
+
+      if (diff >= x_interval) {
+        unsigned long drift = diff % x_interval;
+        //Serial << "drift " << last << " now " << now << " d: " << drift << endl;
+        last = now;
+        last -= drift;
+        return true;
+      }
+      else {
+        return false;
+      }
+  
+    }
+
+    template <typename T>
+    boolean operator()(T lambdaF ) {
+      // simple lambda: []() { do something };
+      boolean hit = (*this)();
+      if (hit) lambdaF();
+      return hit;
+    }
+
+    // sadly, the 'virtual' also prevents optimizing away an unused 'interval' instance-var
+    virtual void reset(boolean now=false) {
+      last = micros();
+      if (now) last -= interval;
+    }
+    void reset(unsigned long interval, boolean now=false) { 
+      this->interval=interval; 
+      reset(now); 
+      }
+
+};
+
 class Every::Toggle : public Every { // not really a ...Sequence
   public:
 
