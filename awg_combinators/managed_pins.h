@@ -8,17 +8,21 @@
   Sets the pinmode at init time, no setup() time needed.
 */
 class ManagedPin : public ValueSource { // virtual
+  // object() is object.value() from ValueSource
   public:
-  static unsigned long used_pin_mask; // = 0. bit mask of used pins
+  static uint16_t used_pin_mask; // = 0. bit mask of used pins
   const int pin = -1;
+  const int _mode = INPUT;
   
-  ManagedPin(int pin) : pin(pin) {}
+  ManagedPin(int pin, int mode) : pin(pin), _mode(mode) {}
 
   void reserve(int pin) {
     // sadly, we can't say the "pin" in this message
     assert( (used_pin_mask & (1ul << pin)) == 0); // "Pin already in use";
     used_pin_mask |= (1ul << pin);
   }
+
+  boolean setup() { return true; }; // return false on fail. pinMode() etc
 
   boolean is_reserved(int pin) {
     return used_pin_mask & (1ul << pin);
@@ -30,14 +34,18 @@ class ManagedPin : public ValueSource { // virtual
     }
 };
 
-unsigned long ManagedPin::used_pin_mask = 0;
+uint16_t ManagedPin::used_pin_mask = 0;
 
 class AnalogPin : public ManagedPin {
   // Input, can't set output
   public:
-  AnalogPin(int pin) : ManagedPin(pin) {
+  AnalogPin(int pin) : ManagedPin(pin, INPUT) {
     reserve(pin);
-    pinMode(pin, INPUT);
+    }
+
+  boolean setup() {
+    pinMode(pin, _mode);
+    return true;
     }
 
   int value() { return analogRead( pin ); }
@@ -47,6 +55,7 @@ class AnalogPinWithDelay : public AnalogPin {
   // prevents ADC interference between pins at the cost of a 1msec blocking delay
   public:
   AnalogPinWithDelay(int pin) : AnalogPin(pin) {}
+
   int value() { 
     analogRead(pin); delay(1);
     return analogRead( pin );
@@ -55,9 +64,13 @@ class AnalogPinWithDelay : public AnalogPin {
 
 class DigitalPin : public ManagedPin {
   public:
-  DigitalPin(int pin, int mode=INPUT) : ManagedPin(pin) {
+  DigitalPin(int pin, int mode=INPUT) : ManagedPin(pin, mode) {
     reserve(pin);
-    pinMode(pin, mode);
+    }
+
+  boolean setup() {
+    pinMode(pin, _mode);
+    return true;
     }
 
   int value() { return digitalRead( pin ); }
@@ -73,15 +86,19 @@ class Switch : public DigitalPin {
 };
 
 class PWMPin : public ManagedPin {
-  // Output, can't read anything
+  int _value = 0;
   public:
-  PWMPin(int pin) : ManagedPin(pin) {
+  PWMPin(int pin) : ManagedPin(pin, INPUT) {
     reserve(pin);
-    pinMode(pin, INPUT);
-    analogWrite(pin,0);
     }
 
-  int value() { return -1; } // doesn't exist yet
-  void operator=(int hilo) { analogWrite(pin, hilo); }
-  void operator=(boolean hilo) { analogWrite(pin, hilo); }
+  boolean setup() {
+    pinMode(pin, _mode);
+    analogWrite(pin,0);
+    return true;
+    }
+
+  int value() { return _value; }
+  void operator=(int hilo) { _value = hilo; analogWrite(pin, hilo); }
+  void operator=(boolean hilo) { (*this) = hilo ? 255 : 0; }
 };
