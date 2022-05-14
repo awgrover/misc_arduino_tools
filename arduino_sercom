@@ -47,24 +47,58 @@ sub do_boards {
 
 sub find_board {
     my ($name) = @_;
+    die "Require board name, try `boards`" if !$name;
     my $board_dir = `find $board_dir/*/hardware/*/*/variants -name $name`;
     chomp $board_dir;
     warn "# $board_dir";
     return $board_dir;
     }
 
-sub do_assigned {
-    describe_pins(shift @ARGV, 1, 0, 0);
-    }
-
 sub do_pins {
-    $opts{pn}=1 if $opts{'sort-pn'};
-    describe_pins(shift @ARGV, 0, $opts{pn}, $opts{'sort-pn'});
+    my $board = shift @ARGV;
+    my ($portpins, $is_sercom) = describe_pins($board, $opts{long}, $opts{assigned});
+    return if $opts{long};
+
+    say "# look at: http://www.atmel.com/images/atmel-42181-sam-d21_datasheet.pdf";
+    say "#      or: https://ww1.microchip.com/downloads/en/DeviceDoc/SAM_D21_DA1_Family_DataSheet_DS40001882F.pdf";
+    say "#      Section 6: Multiplexing and Considerations";
+    say "#      column 'I/O Pin' == PAnn or PBnn";
+    say "#      column C & D are the sercom N's and sercom Pads";
+    say "#              i2c must be: SDA=pad0, SCL=pad1";
+    say "#              find some PAnn corresponding to SercomX/pad0|1, and figure out the arduino-pin";
+    say "#              'connect' to sercom: pinPeripheral(11, PIO_SERCOM); // #include <wiring_private.h>";
+    say "ARD  Pnxx sercom-assigned Possible sercoms (not necessarily the assigned one)";
+
+    my @pp_map = map { [$_ => $portpins->{$_}] } sort keys %$portpins;
+    #say "#ppm ",Dumper(\@pp_map); use Data::Dumper;
+    if (!$opts{pn}) {
+        @pp_map = sort {$a->[1] <=> $b->[1]} @pp_map;
+        }
+
+    for (@pp_map) {
+        my $port_pin = $_->[0];
+        if (!$opts{assigned} || $opts{assigned} && $is_sercom->{$port_pin} ) {
+            my $sercom_strings = "";
+
+            my $sercoms = sercom_map()->{$port_pin} || {};
+            for (qw(sercom sercom_alt)) {
+                my $sercom = sprintf " %s %d[%d] %3s", $_, $sercoms->{$_}->{n}, $sercoms->{$_}->{pad}, $sercoms->{$_}->{i2c};
+                $sercom = " " x length($sercom) if !defined $sercoms->{$_}->{n};
+                $sercom_strings .= $sercom;
+                }
+
+            printf "[%2d] %-4s %-14s %s\n", $_->[1], $port_pin, ($is_sercom->{$port_pin} || ""), $sercom_strings;
+            }
+        }
     }
 
 
 sub describe_pins {
-    my ($board, $only_sercom, $short, $sort_pn) = @_;
+    state %_describe_pins; # Pxnn=>arduino-pin
+    state %_sercom_assigned; # Pxnn=>PIO_SERCOM|PIO_SERCOM_ALT
+
+    my ($board, $long, $only_sercom) = @_;
+
     #die "sort? '$sort_pn'";
     my $cpp = find_board($board) . "/variant.cpp";
     die "No such board, try 'boards'" if ! -e $cpp;
@@ -85,20 +119,20 @@ sub describe_pins {
                 say $_;
                 }
             when (!!$in_desc_list && $_ =~ /^\s*\{\s*PORT/) {
-                if ( !$only_sercom || ( $only_sercom && ($_ =~ /\bPIO_SERCOM/) )) {
-                    if ($short) {
-                        my ($pab, $pn) = /\{\s*PORT([AB])\s*,\s*(\d+)/;
-                        if ($sort_pn) {
-                            push @pn, sprintf("P%s%02d [%2d]", $pab, $pn, $pin );
-                            }
-                        else {
-                            printf "[%2d] P%s%02d\n", $pin, $pab,$pn;
-                            }
-                        }
-                    else {
-                        printf "[%2d] %s\n",$pin,$_;
-                        }
+                my ($pab, $pn) = /\{\s*PORT([AB])\s*,\s*(\d+)/;
+                my $port_pin = sprintf("P%s%02d", $pab, $pn);
+                $_describe_pins{$port_pin} = $pin if !exists $_describe_pins{$port_pin};
+
+                #say "# got line for '$port_pin'";
+
+                if (/\bPIO_SERCOM[_A-Z0-9]*/) {
+                    $_sercom_assigned{ $port_pin } = $& if !exists $_sercom_assigned{ $port_pin };
                     }
+
+                if ($long) {
+                    printf "[%2d] %s\n",$pin,$_ if ($only_sercom && $_sercom_assigned{ $port_pin } || !$only_sercom);
+                    }
+
                 $pin += 1;
                 }
             when (!!$in_desc_list && $_ =~ /;/ ) {
@@ -110,19 +144,8 @@ sub describe_pins {
                 }
             }
         }
-    if ($sort_pn) {
-        say $_ for sort @pn;
-        }
-    say "# pins $pin";
-    say "# look at: http://www.atmel.com/images/atmel-42181-sam-d21_datasheet.pdf";
-    say "#      or: https://ww1.microchip.com/downloads/en/DeviceDoc/SAM_D21_DA1_Family_DataSheet_DS40001882F.pdf";
-    say "#      Section 6: Multiplexing and Considerations";
-    say "#      column 'I/O Pin' == PAnn or PBnn";
-    say "#      column C & D are the sercom N's and sercom Pads";
-    say "#              i2c must be: SDA=pad0, SCL=pad1";
-    say "#              find some PAnn corresponding to SercomX/pad0|1, and figure out the arduino-pin";
-    say "#              'connect' to sercom: pinPeripheral(11, PIO_SERCOM); // #include <wiring_private.h>";
-            
+    
+    return (\%_describe_pins, \%_sercom_assigned);
     }
 
 sub sercom_map {
@@ -195,7 +218,8 @@ sub sercom_map {
                 return 1,$rest;
                 };
 
-            my ($had_sercom, $rest) = $add_sercom->($rest, 0);
+            my $had_sercom;
+            ($had_sercom, $rest) = $add_sercom->($rest, 0);
             next if !$had_sercom;
             # 2nd is optional
             #say "#   that was first sercom string, try in: $rest";
@@ -207,7 +231,7 @@ sub sercom_map {
     }
 
 sub do_sercom_map {
-    sercom_map('print');
+    #sercom_map('print');
     say "# SERCOM map";
     for my $port_pin (sort keys %{ sercom_map() }) {
         my $sercoms = sercom_map->{ $port_pin };
@@ -227,11 +251,11 @@ opts(
   '#' => "arduino sercom deduction",
   # top-level key is 'command', auto invokes do_\$command with \$opts{}
   'boards' => "--- [substring] # list boards $board_dir",
-  'assigned' => '--- $board # pins already assigned to sercom',
   'pins' => [
     '#' => '--- $board # all the pins from variants.cpp',
-    'pn' => 'just ardiuno-pin -> PxN notation',
-    'sort-pn' => 'implies --pn, sort by A|B & N',
+    'long' => 'show full table entry',
+    'pn' => 'sort by A|B & N',
+    'assigned' => 'only pins already assigned to sercom',
     ],
   'sercom-map' => 'samd21 PxNN => sercom-N/pad',
   );
