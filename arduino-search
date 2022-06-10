@@ -1,0 +1,25 @@
+#!/usr/bin/env raku
+# Search /home/awgrover/.arduino15/packages for:
+# --- --code $word # in packages/ .h & .cpp
+# 
+
+use Native::Exec;
+
+our $arduino-stuff = %*ENV{'HOME'} ~ "/.arduino15";
+
+sub do_search(@keywords) {
+    my @cmd = qqww<rgrep @keywords[] $arduino-stuff --include *.h --include *.cpp --include *.hpp>;
+    exec |@cmd;
+    }
+
+multi sub MAIN() { #= just wraps rgrep
+    say $*USAGE;
+    }
+
+multi sub MAIN(*@keywords,Bool :$code) { #= search for words in packages/ .h & .cpp
+    if $code { do_search(@keywords); return; }
+    
+    say $*USAGE; die "only --code implemented";
+
+
+    }
