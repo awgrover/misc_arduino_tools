@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 
 use strict; use warnings; no warnings 'uninitialized'; use 5.012; no if ($^V ge v5.18.0), warnings => 'experimental::smartmatch';
-use Carp; $SIG{__DIE__} = sub { Carp::confess @_ };
+#use Carp; $SIG{__DIE__} = sub { Carp::confess @_ };
 
 use File::Basename qw(basename dirname);
 use IO::Dir;
@@ -23,7 +23,22 @@ sub main {
     }
 
 sub do_boards {
-    my $substring = shift @ARGV;
+  my $substring = shift @ARGV;
+
+  say "# boards (variant)";
+  for my $boards_txt (`find $board_dir -name boards.txt`) {
+    chomp $boards_txt;
+    #say "#try $boards_txt";
+    my $fh = IO::File->new($boards_txt);
+    while(<$fh>) {
+      if ( /^(\w+)\.build\.variant\s*=\s*(\w+)/ ) {
+        chomp;
+        printf "%-30s %s\n",$1,$2;
+        }
+      }
+    }
+
+    say "\n# variants mfg,arch,variant";
 
     for my $variant_dir (sort `find $board_dir -type d -name variants`) {
         # /home/awgrover/.arduino15/packages/adafruit/hardware/samd/1.7.8/variants
@@ -45,18 +60,95 @@ sub do_boards {
         }
     }
 
-sub find_board {
+sub find_variant {
     my ($name) = @_;
     die "Require board name, try `boards`" if !$name;
     my $board_dir = `find $board_dir/*/hardware/*/*/variants -name $name`;
     chomp $board_dir;
-    warn "# $board_dir";
+    warn "# $board_dir" if $board_dir;
     return $board_dir;
     }
 
+sub find_board {
+  my ($board) = @_;
+  my @boards;
+
+  for my $boards_txt (`find $board_dir -name boards.txt`) {
+    chomp $boards_txt;
+    #say "#try $boards_txt";
+    my $fh = IO::File->new($boards_txt);
+    while(<$fh>) {
+      if ( /^(\w+)\.build\.variant\s*=\s*(\w+)/ && $1 eq $board ) {
+        chomp;
+        push @boards, { name=>$1, variant=>$2, where=>$boards_txt};
+        say "Found: $_ in $boards_txt";
+        }
+      }
+    }
+  if (@boards >1) {
+    warn Dumper(@boards); use Data::Dumper;
+    die "More than one '$board' in boards.txt";
+    }
+  return ($boards[0]->{'name'},$boards[0]->{'variant'}, $boards[0]->{'where'});
+  }
+
+sub describe_pins {
+  my ($where, $variant) = @_;
+  my $pins_file = dirname($where) . "/variants/$variant/pins_arduino.h";
+
+  my ($digital_count, $analog_count);
+
+  my $find_counts = sub {
+    my ($dot_h) = @_;
+    say "trying $dot_h";
+    my $fh=IO::File->new($dot_h);
+    while(<$fh>) {
+      # #define NUM_DIGITAL_PINS            20
+      # #define NUM_ANALOG_INPUTS           6
+
+      if ( /#define\s+NUM_DIGITAL_PINS\s+\(?(\d+)/ ) {
+        #say "## dig $_ => $1";
+        $digital_count = $1;
+        }
+      elsif ( /#define\s+NUM_ANALOG_INPUTS\s+\(?(\d+)/ ) {
+        #say "## ana $_ => $1";
+        $analog_count = $1;
+        }
+      }
+    };
+
+  # try both files, e.g. adafruit samd has pins_arduino.h just == "include varint.h"
+  $find_counts->($pins_file);
+  if (! $digital_count && ! $analog_count) {
+    $pins_file = dirname($pins_file) . "/variant.h";
+    $find_counts->( $pins_file );
+    }
+  die "No #define NUM_DIGITAL_PINS in $pins_file" if !$digital_count;
+  die "No #define NUM_ANALOG_PINS in $pins_file" if !$analog_count;
+  say "# $pins_file";
+  say "# digital 0..",$digital_count-1;
+  say "# analog A0..A",$analog_count-1;
+  system('egrep','#define +analogInputToDigitalPin',$pins_file);
+  system('egrep','#define +PIN_A0',$pins_file);
+  say "# SPI:";
+  system('egrep','[ _](SS|MOSI|MISO|SCK)',$pins_file);
+  say "# I2C:";
+  system('egrep','SDA|SCL',$pins_file);
+  say "";
+  }
+
 sub do_pins {
     my $board = shift @ARGV;
-    my ($portpins, $is_sercom) = describe_pins($board, $opts{long}, $opts{assigned});
+    my $variant = $opts{board} ? undef : find_variant($board);
+    if (!$variant) {
+      my $where;
+      ($board, $variant, $where) = find_board($board);
+      die "No such board/variant '$board' in $board_dir/*/hardware/*/*/variants, or ../*/hardware/*/*/boards.txt (try -- boards)" if !$board;
+      describe_pins($where, $variant);
+      }
+    die "No such board/variant '$board' in $board_dir/*/hardware/*/*/variants, or ../*/hardware/*/*/boards.txt (try -- boards)" if !$variant;
+
+    my ($portpins, $is_sercom) = describe_sercom($variant, $opts{long}, $opts{assigned});
     return if $opts{long};
 
     say "# look at: http://www.atmel.com/images/atmel-42181-sam-d21_datasheet.pdf";
@@ -93,15 +185,16 @@ sub do_pins {
     }
 
 
-sub describe_pins {
-    state %_describe_pins; # Pxnn=>arduino-pin
+sub describe_sercom {
+    state %_describe_sercom; # Pxnn=>arduino-pin
     state %_sercom_assigned; # Pxnn=>PIO_SERCOM|PIO_SERCOM_ALT
 
     my ($board, $long, $only_sercom) = @_;
 
     #die "sort? '$sort_pn'";
-    my $cpp = find_board($board) . "/variant.cpp";
-    die "No such board, try 'boards'" if ! -e $cpp;
+    my $variant_dir = $board; # find_variant($board);
+    my $cpp = "$variant_dir/variant.cpp";
+    die "No variants (thus no sercom) $cpp, try 'boards'" if ! -e $cpp;
     say "# $cpp";
     say "# 'PORTA, nn' -> PAnn, likewise PORTB -> PBnn";
     #say "# 
@@ -121,7 +214,7 @@ sub describe_pins {
             when (!!$in_desc_list && $_ =~ /^\s*\{\s*PORT/) {
                 my ($pab, $pn) = /\{\s*PORT([AB])\s*,\s*(\d+)/;
                 my $port_pin = sprintf("P%s%02d", $pab, $pn);
-                $_describe_pins{$port_pin} = $pin if !exists $_describe_pins{$port_pin};
+                $_describe_sercom{$port_pin} = $pin if !exists $_describe_sercom{$port_pin};
 
                 #say "# got line for '$port_pin'";
 
@@ -145,7 +238,7 @@ sub describe_pins {
             }
         }
     
-    return (\%_describe_pins, \%_sercom_assigned);
+    return (\%_describe_sercom, \%_sercom_assigned);
     }
 
 sub sercom_map {
@@ -253,6 +346,7 @@ opts(
   'boards' => "--- [substring] # list boards $board_dir",
   'pins' => [
     '#' => '--- $board # all the pins from variants.cpp',
+    'board' => 'use board name, not variant',
     'long' => 'show full table entry',
     'pn' => 'sort by A|B & N',
     'assigned' => 'only pins already assigned to sercom',
