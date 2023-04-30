@@ -1,0 +1,152 @@
+# particle.io cli conveniences
+# try make help
+
+# assumes at project root, i.e. where project.properties is
+
+MAKEFLAGS += --no-builtin-rules
+
+# local compile: https://github.com/nrobinson2000/neopo
+local:=$(if $(PARTICLE),, $(if $(shell which neopo), local,))
+compiled_file:= $(if $(local), target/boron/boron-temptest.dfu, firmware.bin )
+config_file:=.particle
+configured:=$(if $(local), .vscode/settings.json, .particle)
+
+Monitor:=$(if $(NOMONITOR),,&& particle serial monitor --follow)
+
+devicename:=$(shell cat $(config_file)/devicename || false)
+firmware:=$(shell cat $(config_file)/firmware || false)
+devicetype:=$(shell cat $(config_file)/devicetype || false)
+
+.PHONY : upload
+upload : $(compiled_file) flash
+
+.PHONY : help
+help :
+	@echo "PARTICLE='$(PARTICLE)' so local? '$(local)'"
+	@echo env VERBOSE=1 PARTICLE=1 ...
+	$(if $(local),neopo run help,true)
+
+.PHONY : where
+where :
+	@pwd
+	$(if $(local),\
+		@echo Pin definitions are in `make help | grep '\$$DEVICE_OS_PATH'`/hal/src/$(devicetype)/pinmap_defines.h, \
+		@echo Pin definitions are available if neopo is installed \
+	)
+	$(if $(local),@ls -l target/$(devicetype)/*.bin,@#)
+
+.PHONY : compile
+compile : .particle $(configured) $(compiled_file)
+
+$(configured) : .particle/devicename .particle/devicetype .particle/firmware
+	$(if $(local), \
+	neopo configure $(devicetype) $(firmware) . \
+	, \
+	mkdir -p $@ \
+	echo "Setup $(devicename) $(devicetype) $(firmware) in $@\
+	)
+
+
+$(compiled_file) : $(shell find src -type f -name '*.ino' -o -name '*.h' -o -name '*.cpp')
+	$(if $(local), \
+	env bash -c 'neopo compile $(if $(VERBOSE),-v,) 2>&1 > >( tee compile.log )' \
+	, \
+	true have to remove .cpps made by neopo; \
+	echo $(addsuffix .cpp,$(basename $(shell find -L src -maxdepth 1 -type f -name '*.ino'))) | xargs --no-run-if-empty rm; \
+	bash -c 'particle compile $(devicetype) --followSymlinks --saveTo $@ --target $(firmware) 2>&1 > >( tee compile.log )' \
+	)
+
+.PHONY : flash
+flash : $(compiled_file)
+	$(if $(local), \
+	bash -c 'neopo flash $(if $(VERBOSE),-v,) 2>&1 > >( tee flash.log ) $(Monitor)' \
+	, \
+	bash -c 'set -e; particle flash $(devicename) firmware.bin 2>&1 > >( tee flash.log ) && particle serial monitor --follow' \
+	)
+
+#.PHONY : config-info
+#config-info: .particle .particle/devicename .particle/devicetype .particle/firmware 
+
+.particle :
+	@echo "Need at least: .particle/devicename .particle/devicetype .particle/firmware"
+
+.particle/devicename :
+	@echo -n 'Need device-name, place particle in listen <return> '
+	@read dumy
+	particle usb list | perl -na -e 'print($$F[0],"\n")' > $@
+
+.particle/devicetype :
+	@echo -n 'Need device type: '
+	@read dumy && echo $$dumy > $@
+
+.particle/firmware :
+	@echo -n 'Need firmware version, place particle in listen <return> '
+	@read dumy
+	particle identify | grep 'firmware' | perl -na -e 'print($$F[-1],"\n")' > $@
+
+
+# Create a file in alarm-framework, init as a service class, link to src/
+.PHONY : template/%
+template/% : src/.gitignore/% README/ln-s/% src/ln-s/%
+	@# need dumy op
+
+.PHONY : src/ln-s/%
+src/ln-s/% :
+	klass=$(basename $(notdir $*)) tmpl=../alarm-framework/$*; \
+	if [ ! -e $$tmpl ]; then \
+		echo "class $$klass : public ServiceInterface {\n  public:\n    $$klass(...) {...}\n" > $$tmpl; \
+		awk '/^class ServiceInterface/,/^\}/' ../alarm-framework/Service.h | grep virtual | egrep '= *0' | sed 's/virtual '//' -e 's/= *0/ {}/' >> $$tmpl; \
+		echo "};" >> $$tmpl; \
+		git add $$tmpl; \
+	fi; \
+	if [ ! -h src/$* ]; then \
+		ln -s ../$$tmpl src; \
+	fi
+
+# ensure a .gitignore line
+.PHONY : src/.gitignore/%
+src/.gitignore/% : src/.gitignore FORCE
+	grep '/$*' $< >/dev/null || echo '/$*' >> $<
+
+src/.gitignore :
+	touch $@
+	git add $@
+
+# ensure a ln -s for a template file
+.PHONY : README/ln-s/%
+README/ln-s/% :
+	grep 'ln -s ../../alarm-framework/$*' README.md >/dev/null || echo 'ln -s ../../alarm-framework/$* boron-minus80/src/$*' >> README.md
+
+
+lib/% : $(HOME)/Arduino/libraries/%
+	@# if this fails, check the lib name, some have +"_library"
+	mkdir -p $@
+	if [ -e $</src ] ; then \
+		ln -s $</src $@/src; \
+	else \
+		mkdir -p $@/src; \
+		for x in $</*.h $</*.cpp; do \
+			ln -s $$x $@/src; \
+		done; \
+	fi
+	@if [ -L $@/src ]; then \
+		ls -ld $@/src; \
+	else \
+		ls -l $@/src; \
+	fi
+
+.PHONY : link-list
+# make/regen the `ln -s` list for the README
+link-list : 
+	find src -type l | sort | xargs -n 1 basename | xargs -n 1 -Ix echo ln -s ../../alarm-framework/x boron-minus80/src/x
+
+.PHONY : lib-list
+# make/regen the `ln -s` list for the arduino-libs
+lib-list :
+	@if [ -d lib ]; then \
+		find lib -type l | ../particle-lib-list; \
+	fi
+
+FORCE :
+
+.SUFFIXES:

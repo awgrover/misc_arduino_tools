@@ -198,6 +198,9 @@ class Every {
 
     class Toggle;
     class Pattern;
+#ifdef SPARK_PLATFORM
+    class Timer;
+#endif
 };
 
 class EveryMicros {
@@ -362,7 +365,13 @@ class Every::Pattern : public Every {
     }
 };
 
-class Timer { // True, once, after n millis
+#ifdef SPARK_PLATFORM
+// particle.io beasties have a Timer class
+class Every::Timer {
+#else
+class Timer { 
+#endif
+  // True, once, after n millis
   // NB: Slightly different methods than Every
   public:
     unsigned long last;
